@@ -5,21 +5,27 @@ Usage: python alpaca_connection/websocket.py
 Raymond Kil, September 2025 (jkil@nd.edu)
 """
 
-import yaml, os, websockets, json, asyncio
+import yaml, os, websockets, json, asyncio, datetime
+import time
 from argparse import ArgumentParser
+from .strategies import *
 
-def getConfig(configpath):
-    with open(configpath, 'r') as y: 
-        config = yaml.safe_load(y)['alpaca']
-        key_id     = config["key_id"]
-        secret_key = config["secret_key"]
-        stream_url = config["stream_url"]
-    return key_id, secret_key, stream_url
+def getConfig(configpath, mode):
+    with open(configpath, 'r') as y:
+        return yaml.safe_load(y)[mode]
 
-async def receiveAlpacaData(key_id, secret_key, stream_url):
-    async with websockets.connect(stream_url) as websocket:
+def parseQuote(msg: dict):
+    bp, ap, t = msg.get("bp"), msg.get("ap"), msg.get("t")
+    ts = datetime.fromisoformat(t.replace("Z","+00:00")).timestamp()
+    mp = 0.5 * (bp + ap)
+    return {"timestamp": ts, "bidPrice": bp, "askPrice": ap, "midPrice": mp}
+
+
+
+async def receiveAlpacaData(c, strategy):
+    async with websockets.connect(c['stream_url']) as websocket:
         # Authentication
-        auth_msg = {"action": "auth", "key": key_id, "secret": secret_key}
+        auth_msg = {"action": "auth", "key": c['key_id'], "secret": c['secret_key']}
         await websocket.send(json.dumps(auth_msg))
         print("✅ Authentication message successfully sent!")
 
@@ -30,8 +36,15 @@ async def receiveAlpacaData(key_id, secret_key, stream_url):
 
         # Loading data from Alpaca
         async for msg in websocket:
-            data = json.loads(msg)
-            print("Received:", data)
+            data = json.loads(msg) # data is a list of dicts
+            for d in data:
+                Q = parseQuote(d)
+
+
+
+
+
+            # print("Received:", data)
 
 if __name__ == "__main__":
     parser = ArgumentParser(prog='websocket.py', epilog="jkil@nd.edu")
@@ -39,5 +52,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     scriptPath = os.path.dirname(os.path.abspath(__file__))
-    config = getConfig(f"{scriptPath}/config.yaml")
-    asyncio.run(receiveAlpacaData(*config))
+    config = getConfig(f"{scriptPath}/config.yaml", args.mode)
+    asyncio.run(receiveAlpacaData(config, args.mode))
