@@ -5,22 +5,24 @@ Usage: python alpaca_connection/websocket.py
 Raymond Kil, September 2025 (jkil@nd.edu)
 """
 
-import yaml, os, websockets, json, asyncio, datetime
+import yaml, os, websockets, json, asyncio
+from datetime import datetime
 import time
 from argparse import ArgumentParser
-from .strategies import *
+from strategies import *
 
 def getConfig(configpath, mode):
     with open(configpath, 'r') as y:
         return yaml.safe_load(y)[mode]
 
 def parseQuote(msg: dict):
-    bp, ap, t = msg.get("bp"), msg.get("ap"), msg.get("t")
-    ts = datetime.fromisoformat(t.replace("Z","+00:00")).timestamp()
-    mp = 0.5 * (bp + ap)
-    return {"timestamp": ts, "bidPrice": bp, "askPrice": ap, "midPrice": mp}
-
-
+    if "bp" in msg.keys():
+        bp, ap, t = msg.get("bp"), msg.get("ap"), msg.get("t")
+        ts = datetime.fromisoformat(t.replace("Z","+00:00")).timestamp()
+        mp = 0.5 * (bp + ap)
+        return {"timestamp": round(ts, 5), "bidPrice": round(bp, 5), "askPrice": round(ap, 5), "midPrice": round(mp, 5)}
+    else:
+        return None
 
 async def receiveAlpacaData(c, strategy):
     async with websockets.connect(c['stream_url']) as websocket:
@@ -39,12 +41,11 @@ async def receiveAlpacaData(c, strategy):
             data = json.loads(msg) # data is a list of dicts
             for d in data:
                 Q = parseQuote(d)
+                # determine buy or sell
 
-
-
-
-
-            # print("Received:", data)
+                # make Payload
+                payload = makePayload(Q['midPrice'])
+                # send the payload
 
 if __name__ == "__main__":
     parser = ArgumentParser(prog='websocket.py', epilog="jkil@nd.edu")
