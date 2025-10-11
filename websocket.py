@@ -7,7 +7,7 @@ Raymond Kil, September 2025 (jkil@nd.edu)
 
 import yaml, os, websockets, json, asyncio
 from datetime import datetime
-import time
+from collections import deque
 from argparse import ArgumentParser
 from strategies import *
 
@@ -16,15 +16,12 @@ def getConfig(configpath, mode):
         return yaml.safe_load(y)[mode]
 
 def parseQuote(msg: dict):
-    if "bp" in msg.keys():
-        bp, ap, t = msg.get("bp"), msg.get("ap"), msg.get("t")
-        ts = datetime.fromisoformat(t.replace("Z","+00:00")).timestamp()
-        mp = 0.5 * (bp + ap)
-        return {"timestamp": round(ts, 5), "bidPrice": round(bp, 5), "askPrice": round(ap, 5), "midPrice": round(mp, 5)}
-    else:
-        return None
+    bp, ap, t = msg.get("bp"), msg.get("ap"), msg.get("t")
+    ts = datetime.fromisoformat(t.replace("Z","+00:00")).timestamp()
+    mp = 0.5 * (bp + ap)
+    return {"timestamp": round(ts, 5), "bidPrice": round(bp, 5), "askPrice": round(ap, 5), "midPrice": round(mp, 5)}
 
-async def receiveAlpacaData(c, strategy):
+async def receiveAlpacaData(c, strategy_func, strategy_args, PriceHistory):
     async with websockets.connect(c['stream_url']) as websocket:
         # Authentication
         auth_msg = {"action": "auth", "key": c['key_id'], "secret": c['secret_key']}
@@ -40,12 +37,19 @@ async def receiveAlpacaData(c, strategy):
         async for msg in websocket:
             data = json.loads(msg) # data is a list of dicts
             for d in data:
-                Q = parseQuote(d)
-                # determine buy or sell
+                if d["T"]=="q": # if a message is a quote...
+                    Q = parseQuote(d)
+                    PriceHistory.append((Q['midPrice'], Q['timestamp']))
+                    # determine buy or sell
+                    move = strategy_func(PriceHistory, *strategy_args)
+                    print('move', move)
 
-                # make Payload
-                payload = makePayload(Q['midPrice'])
-                # send the payload
+                    # make Payload
+                    if move:
+                        payload = makePayload(Q, move)
+                        print(payload)
+
+                    # TODO: send the payload
 
 if __name__ == "__main__":
     parser = ArgumentParser(prog='websocket.py', epilog="jkil@nd.edu")
@@ -54,4 +58,5 @@ if __name__ == "__main__":
 
     scriptPath = os.path.dirname(os.path.abspath(__file__))
     config = getConfig(f"{scriptPath}/config.yaml", args.mode)
-    asyncio.run(receiveAlpacaData(config, args.mode))
+    PriceHistory = deque() # each element is a tuple (mp, ts). Rightmost is most recent, leftmost is oldest.
+    asyncio.run(receiveAlpacaData(config, STRATEGIES[args.strategy]['func'], STRATEGIES[args.strategy]['args'], PriceHistory))

@@ -9,28 +9,28 @@ import os, asyncio, ast
 from collections import deque
 from argparse import ArgumentParser
 from strategies import *
-from websocket import getConfig, parseQuote
+from websocket import parseQuote
 
 async def receiveAlpacaData(strategy_func, strategy_args, filepath, PriceHistory):
     with open(filepath, 'r') as f:
-        for line in f:
-            await asyncio.sleep(0.5)
-            for l in ast.literal_eval(line):
-                Q = parseQuote(l)
+        for i, msg in enumerate(f):
+            print(f"----------msg {i}----------")
+            await asyncio.sleep(0.001)
+            for d in ast.literal_eval(msg): # equiv to `for d in data:` msg in websocket.py
+                if d["T"]=="q": # if a message is a quote...
+                    Q = parseQuote(d)
+                    PriceHistory.append((Q['midPrice'], Q['timestamp']))
+                    # determine buy or sell
+                    move = strategy_func(PriceHistory, *strategy_args)
+                    print('move', move)
 
-                # determine buy or sell
-                PriceHistory.append((Q['midPrice'], Q['timestamp']))
-                move = strategy_func(PriceHistory, *strategy_args)
+                    # make Payload
+                    if move:
+                        payload = makePayload(Q, move)
+                        # print(payload)
 
-                # make Payload
-                # send (print) the Payload
-
-                # if   move == 'buy' : asyncio.create_task(bracketOrder('buy' , Q["askPrice"]))
-                # elif move == 'sell': asyncio.create_task(bracketOrder('sell', Q["bidPrice"]))
-
-STRATEGIES = {
-    "momentum": {"func": momentum_strategy, "args": [0.15]}, # args: [timeWindow(seconds)]
-}
+                    # if   move == 'buy' : asyncio.create_task(bracketOrder('buy' , Q["askPrice"]))
+                    # elif move == 'sell': asyncio.create_task(bracketOrder('sell', Q["bidPrice"]))
 
 if __name__ == "__main__":
     parser = ArgumentParser(prog='websocket.py', epilog="jkil@nd.edu")
