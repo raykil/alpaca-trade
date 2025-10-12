@@ -11,6 +11,7 @@ from argparse import ArgumentParser
 from strategies import *
 from websocket import parseQuote
 from QuotePlotter import QuotePlotter
+from datetime import datetime
 
 async def receiveAlpacaData(strategy_func, strategy_args, filepath, PriceHistory):
     with open(filepath, 'r') as f:
@@ -29,6 +30,8 @@ async def receiveAlpacaData(strategy_func, strategy_args, filepath, PriceHistory
                     # make Payload
                     if move:
                         payload = makePayload(Q, move)
+                        plotter.markTrade(Q, move)
+                        print(f"move:{move}, ts:{datetime.fromtimestamp(Q['timestamp'])}, buy:{Q['askPrice']}, sel: {Q['bidPrice']}")
 
                     # if   move == 'buy' : asyncio.create_task(bracketOrder('buy' , Q["askPrice"]))
                     # elif move == 'sell': asyncio.create_task(bracketOrder('sell', Q["bidPrice"]))
