@@ -24,7 +24,7 @@ def momentum_strategy(PriceHistory, timeWindow: float) -> str:
     if   delta_mp > buy_threshold: move = 'buy'
     elif delta_mp < sel_threshold: move = 'sell'
     else: move = None
-    print(f"i: {PriceHistory[-1][0]} f: {PriceHistory[0][0]}, delta: {round(PriceHistory[-1][0] - PriceHistory[0][0], 3)} move: {move}")
+    # print(f"i: {PriceHistory[-1][0]} f: {PriceHistory[0][0]}, delta: {round(PriceHistory[-1][0] - PriceHistory[0][0], 3)} move: {move}")
     return move
 
 

@@ -10,24 +10,25 @@ from collections import deque
 from argparse import ArgumentParser
 from strategies import *
 from websocket import parseQuote
+from QuotePlotter import QuotePlotter
 
 async def receiveAlpacaData(strategy_func, strategy_args, filepath, PriceHistory):
     with open(filepath, 'r') as f:
         for i, msg in enumerate(f):
             print(f"----------msg {i}----------")
-            await asyncio.sleep(0.001)
+            await asyncio.sleep(0.1) # This part controls how fast emulated messages arrive
             for d in ast.literal_eval(msg): # equiv to `for d in data:` msg in websocket.py
                 if d["T"]=="q": # if a message is a quote...
                     Q = parseQuote(d)
                     PriceHistory.append((Q['midPrice'], Q['timestamp']))
+                    plotter.update(Q)
+
                     # determine buy or sell
                     move = strategy_func(PriceHistory, *strategy_args)
-                    print('move', move)
 
                     # make Payload
                     if move:
                         payload = makePayload(Q, move)
-                        # print(payload)
 
                     # if   move == 'buy' : asyncio.create_task(bracketOrder('buy' , Q["askPrice"]))
                     # elif move == 'sell': asyncio.create_task(bracketOrder('sell', Q["bidPrice"]))
@@ -39,4 +40,5 @@ if __name__ == "__main__":
 
     scriptPath = os.path.dirname(os.path.abspath(__file__))
     PriceHistory = deque() # each element is a tuple (mp, ts). Rightmost is most recent, leftmost is oldest.
+    plotter = QuotePlotter()
     asyncio.run(receiveAlpacaData(STRATEGIES[args.strategy]['func'], STRATEGIES[args.strategy]['args'], f"{scriptPath}/appl_clean.log", PriceHistory))
