@@ -33,14 +33,27 @@ async def receiveMessages(websocket):
                 bar = {'Open': msg['o'], 'High': msg['h'], 'Low': msg['l'], 'Close': msg['c'], 'Volume': msg['v']}
                 yield timestamp, bar
 
+def initializePlot(BARS):
+    plt.ion()
+    dummytimestamp = datetime.fromisoformat("2025-11-03T19:42:00Z").astimezone(ZoneInfo("America/New_York")).replace(tzinfo=None)
+    BARS.loc[dummytimestamp] = {'Open': 0, 'High': 0, 'Low': 0, 'Close': 0, 'Volume': 0}
+    axes = mpf.plot(BARS, returnfig=True)[1]
+    return axes
+
+def plotBars(BARS, axes):
+    axes[0].clear()
+    mpf.plot(BARS.iloc[1:], ax=axes[0], type='candle')
+    plt.pause(0.001)
+
 async def trade(c, symbols: list[str]):
     async with websockets.connect(c['stream_url']) as websocket:
         await authenticate(websocket, c)
         await subscribe(websocket, symbols)
         BARS = initializeBars()
+        axes = initializePlot(BARS)
         async for timestamp, bar in receiveMessages(websocket):
-            BARS.loc[timestamp] = bar
-            print('here it is', timestamp, bar)
+            BARS.loc[timestamp] = bar; print(timestamp, bar)
+            plotBars(BARS, axes)
 
 if __name__ == "__main__":
     parser = ArgumentParser(prog='websocket.py', epilog="jkil@nd.edu")
