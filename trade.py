@@ -13,12 +13,12 @@ async def authenticate(websocket, c):
     auth_msg = {"action": 'auth', "key": c['key_id'], "secret": c['secret_key']}
     await websocket.send(json.dumps(auth_msg))
 
-async def subscribe(websocket, symbols: list[str]): # Ex) symbols: ["AAPL", "TSLA"]
+async def subscribe(websocket, symbols: list[str]):
     subscribe_msg = {"action": 'subscribe', "bars": symbols} # "updatedBars": symbols
     await websocket.send(json.dumps(subscribe_msg))
 
 def initializeBars():
-    b = pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
+    b = pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume', 'avgPrice'])
     b.index = pd.DatetimeIndex([], name='Timestamp')
     return b
 
@@ -30,30 +30,37 @@ async def receiveMessages(websocket):
             elif msg['T']=='subscription': print("✅ Subscribed to:", {k: v for k, v in msg.items() if isinstance(v, list) and v})
             elif (msg['T']=='b')|(msg['T']=='u'):
                 timestamp = datetime.fromisoformat(msg['t']).astimezone(ZoneInfo("America/New_York")).replace(tzinfo=None)
-                bar = {'Open': msg['o'], 'High': msg['h'], 'Low': msg['l'], 'Close': msg['c'], 'Volume': msg['v']}
-                yield timestamp, bar
-
-def initializePlot(BARS):
-    plt.ion()
-    dummytimestamp = datetime.fromisoformat("2025-11-03T19:42:00Z").astimezone(ZoneInfo("America/New_York")).replace(tzinfo=None)
-    BARS.loc[dummytimestamp] = {'Open': 0, 'High': 0, 'Low': 0, 'Close': 0, 'Volume': 0}
-    axes = mpf.plot(BARS, returnfig=True)[1]
-    return axes
+                message = {
+                    'Open': msg['o'], 'High': msg['h'], 'Low': msg['l'], 'Close': msg['c'], 'Volume': msg['v'], 
+                    'avgPrice': msg['vw']
+                }
+                yield timestamp, message
 
 def plotBars(BARS, axes):
+    if axes is None:
+        avgPlot = mpf.make_addplot(BARS['avgPrice'], width=1, color='royalblue')
+        axes = mpf.plot(BARS[['Open', 'High', 'Low', 'Close', 'Volume']], type='candle', addplot=avgPlot, returnfig=True)[1]
+        return axes
     axes[0].clear()
-    mpf.plot(BARS.iloc[1:], ax=axes[0], type='candle')
+    avgPlot = mpf.make_addplot(BARS['avgPrice'], width=1, color='royalblue', ax=axes[0])
+    mpf.plot(BARS[['Open', 'High', 'Low', 'Close', 'Volume']], type='candle', addplot=avgPlot, ax=axes[0])
     plt.pause(0.001)
+    return axes
+
+def appendBars(BARS, timestamp, msg):
+    BARS.loc[timestamp] = msg
+    BARS = BARS.iloc[-29:]
+    print(timestamp, BARS.iloc[-1].to_dict())
 
 async def trade(c, symbols: list[str]):
     async with websockets.connect(c['stream_url']) as websocket:
         await authenticate(websocket, c)
         await subscribe(websocket, symbols)
         BARS = initializeBars()
-        axes = initializePlot(BARS)
-        async for timestamp, bar in receiveMessages(websocket):
-            BARS.loc[timestamp] = bar; print(timestamp, bar)
-            plotBars(BARS, axes)
+        plt.ion(); axes=None
+        async for timestamp, msg in receiveMessages(websocket):
+            appendBars(BARS, timestamp, msg)
+            axes = plotBars(BARS, axes)
 
 if __name__ == "__main__":
     parser = ArgumentParser(prog='websocket.py', epilog="jkil@nd.edu")
