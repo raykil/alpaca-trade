@@ -6,6 +6,7 @@ import pandas as pd
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import mplfinance as mpf
+from strategies import *
 
 def loadConfig(configpath, mode):
     with open(configpath, 'r') as c: return json.load(c)[mode]
@@ -18,16 +19,19 @@ async def subscribe(websocket, symbols: list[str]):
     subscribe_msg = {"action": 'subscribe', "bars": symbols} # "updatedBars": symbols
     await websocket.send(json.dumps(subscribe_msg))
 
-def initializeBars():
-    b = pd.DataFrame({
-        'Open':     pd.Series(dtype='float64'),
-        'High':     pd.Series(dtype='float64'),
-        'Low':      pd.Series(dtype='float64'),
-        'Close':    pd.Series(dtype='float64'),
-        'Volume':   pd.Series(dtype='float64'),
-        'avgPrice': pd.Series(dtype='float64'),
-        'move':     pd.Series(dtype='string')
-    }, index=pd.DatetimeIndex([], name='Timestamp'))
+def initializeBars(csv_path=None, nRows=None):
+    if csv_path:
+        b = pd.read_csv(csv_path, parse_dates=['Timestamp'], index_col='Timestamp').tail(nRows)
+    else:
+        b = pd.DataFrame({
+            'Open':     pd.Series(dtype='float64'),
+            'High':     pd.Series(dtype='float64'),
+            'Low':      pd.Series(dtype='float64'),
+            'Close':    pd.Series(dtype='float64'),
+            'Volume':   pd.Series(dtype='float64'),
+            'avgPrice': pd.Series(dtype='float64'),
+            'move':     pd.Series(dtype='string')
+        }, index=pd.DatetimeIndex([], name='Timestamp'))
     return b
 
 async def receiveMessages(websocket):
@@ -41,11 +45,12 @@ async def receiveMessages(websocket):
                 message = {'Open': msg['o'], 'High': msg['h'], 'Low': msg['l'], 'Close': msg['c'], 'Volume': msg['v'], 'avgPrice': msg['vw']}
                 yield timestamp, message
 
-def appendBars(BARS, timestamp, msg, window=70):
+def appendBars(BARS, timestamp, msg):
     BARS.loc[timestamp, ['Open','High','Low','Close','Volume','avgPrice']] = msg
-    BARS = BARS[-window:] # window: Max number of bars to show.
+    BARS.to_csv("bars.csv", index=True)
 
-def plotBars(BARS, axes, symbols):
+def plotBars(BARS, axes, symbols, nBars=70):
+    BarsToPlot = BARS.copy().iloc[-nBars:]
     textcolor = 'whitesmoke'
     candle_colors = mpf.make_marketcolors(up='#2d8b30', down='#a50f12', wick='silver', edge='silver', volume='blue')
     candle_style = mpf.make_mpf_style(marketcolors=candle_colors)
@@ -53,29 +58,29 @@ def plotBars(BARS, axes, symbols):
         'avgLine'    : {'width': 1, 'color': 'royalblue', 'label':'Volume-weighted average price'},
         'avgScatter' : {'type': 'scatter', 'color': 'royalblue', 'markersize': 30},
         'candle'     : {'type': 'candle' , 'returnfig': True, 'figsize':(14,8), 'style': candle_style},
-        'buyScatter' : {'type': 'scatter', 'markersize': 180, 'color': "tab:blue", 'marker': 'H', 'label': 'Buy'},
+        'buyScatter' : {'type': 'scatter', 'markersize': 180, 'color': "tab:cyan", 'marker': '^', 'label': 'Buy'},
         'sellScatter': {'type': 'scatter', 'markersize': 180, 'color': "tab:orange", 'marker': 'v', 'label': 'Sell'},
         'title'      : {'color': textcolor, 'fontsize': 16, 'fontweight': 'bold'},
         'labels'     : {'color': textcolor, 'fontsize': 14},
         'tickmarks'  : {'colors': textcolor}
     }
-    buy_markers  = np.where(BARS['move']=='buy' , BARS['avgPrice'], np.nan)
-    sell_markers = np.where(BARS['move']=='sell', BARS['avgPrice'], np.nan)
+    buy_markers  = np.where(BarsToPlot['move']=='buy' , BarsToPlot['avgPrice'], np.nan)
+    sell_markers = np.where(BarsToPlot['move']=='sell', BarsToPlot['avgPrice'], np.nan)
     if axes is None:
-        fig, axes = mpf.plot(BARS[['Open', 'High', 'Low', 'Close', 'Volume']], **plotConfig['candle'])
+        fig, axes = mpf.plot(BarsToPlot[['Open', 'High', 'Low', 'Close', 'Volume']], **plotConfig['candle'])
     else:
         axes[0].clear()
         for p in ['avgLine', 'avgScatter', 'candle', 'buyScatter', 'sellScatter']: plotConfig[p]['ax'] = axes[0]
         additional_plots = [
-            mpf.make_addplot(BARS['avgPrice'], **plotConfig['avgLine']),
-            mpf.make_addplot(BARS['avgPrice'], **plotConfig['avgScatter']),
+            mpf.make_addplot(BarsToPlot['avgPrice'], **plotConfig['avgLine']),
+            mpf.make_addplot(BarsToPlot['avgPrice'], **plotConfig['avgScatter']),
             mpf.make_addplot(buy_markers , **plotConfig['buyScatter']),
             mpf.make_addplot(sell_markers, **plotConfig['sellScatter']),
         ]
         plotConfig['candle'].pop('figsize')
         plotConfig['candle'].pop('returnfig')
         plotConfig['candle']['addplot'] = additional_plots
-        mpf.plot(BARS[['Open', 'High', 'Low', 'Close', 'Volume']], **plotConfig['candle'])
+        mpf.plot(BarsToPlot[['Open', 'High', 'Low', 'Close', 'Volume']], **plotConfig['candle'])
         fig = axes[0].figure
 
     # Style
@@ -94,37 +99,28 @@ def plotBars(BARS, axes, symbols):
     plt.pause(0.001)
     return axes
 
-
-def appendMove(BARS, window=3):
-    avgPrices = BARS['avgPrice'].to_numpy()[-window:]
-    p_i, p_f = avgPrices[0], avgPrices[-1]
-    delta_p = p_f-p_i
-    if   (len(avgPrices)>=window) & (delta_p> 100): move = 'buy'
-    elif (len(avgPrices)>=window) & (delta_p<-100): move = 'sell'
-    else: move = 'hold'
-    BARS.loc[BARS.index[-1], 'move'] = move
+def appendMove(BARS, strategy, **kwargs):
+    BARS.loc[BARS.index[-1], 'move'] = strategy(BARS, **kwargs)
     print(BARS.iloc[-1].to_dict())
-    return move
 
-
-async def trade(c, symbols: list[str]):
+async def trade(c, symbols: list[str], strategy, **strategy_kwargs):
     async with websockets.connect(c['stream_url']) as websocket:
         await authenticate(websocket, c)
         await subscribe(websocket, symbols)
-        BARS = initializeBars()
+        BARS = initializeBars(nRows=5)
         plt.ion(); axes=None
         async for timestamp, msg in receiveMessages(websocket):
             appendBars(BARS, timestamp, msg)
-            appendMove(BARS)
+            appendMove(BARS, strategy, **strategy_kwargs)
             axes = plotBars(BARS, axes, symbols)
 
 if __name__ == "__main__":
     parser = ArgumentParser(prog='websocket.py', epilog="jkil@nd.edu")
     parser.add_argument('-m', '--mode'    , default="crypto_paper", type=str , help="Keys in config.json. Options: paper, live, crypto_paper.")
     parser.add_argument('-s', '--strategy', default="momentum"    , type=str , help="Options: momentum only for now")
-    parser.add_argument('-t', '--symbols' , default=["BTC/USD"]   , help="Options: momentum only for now")
+    parser.add_argument('-t', '--symbols' , default=["BTC/USD"])
     args = parser.parse_args()
 
     scriptPath = os.path.dirname(os.path.abspath(__file__))
     config = loadConfig(f"{scriptPath}/config.json", args.mode)
-    asyncio.run(trade(config, args.symbols))
+    asyncio.run(trade(config, args.symbols, strategy_map[args.strategy]))
