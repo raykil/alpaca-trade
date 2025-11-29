@@ -1,11 +1,15 @@
+"""
+Usage: python trade.py -s reverse_momentum
+"""
+
 import os, json, asyncio, websockets
-from argparse import ArgumentParser
 import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
+import mplfinance as mpf
+import matplotlib.pyplot as plt
 from datetime import datetime
 from zoneinfo import ZoneInfo
-import mplfinance as mpf
+from argparse import ArgumentParser
 from strategies import *
 
 def loadConfig(configpath, mode):
@@ -47,7 +51,7 @@ async def receiveMessages(websocket):
 
 def appendBars(BARS, timestamp, msg):
     BARS.loc[timestamp, ['Open','High','Low','Close','Volume','avgPrice']] = msg
-    BARS.to_csv("bars.csv", index=True)
+    BARS.to_csv(f"price_history/{BARS.index[0].strftime("%y%m%dT%H%M")}.csv", index=True)
 
 def plotBars(BARS, axes, symbols, nBars=70):
     BarsToPlot = BARS.copy().iloc[-nBars:]
@@ -99,19 +103,44 @@ def plotBars(BARS, axes, symbols, nBars=70):
     plt.pause(0.001)
     return axes
 
-def appendMove(BARS, strategy, **kwargs):
-    BARS.loc[BARS.index[-1], 'move'] = strategy(BARS, **kwargs)
+def makeMove(BARS, strategy, **kwargs):
+    move = strategy(BARS, **kwargs)
+    return move
+
+def appendMove(BARS, move):
+    BARS.loc[BARS.index[-1], 'move'] = move
     print(BARS.iloc[-1].to_dict())
+
+def buildOrder(symbol, move, BARS, order_type='limit', qty='0.001'):
+    order = {
+        "symbol": symbol,
+        "side"  : move,
+        "type"  : order_type, # this func should accept type, and strategy should determine and return type.
+        "qty"   : qty,
+        "time_in_force": 'gtc' # https://docs.alpaca.markets/docs/orders-at-alpaca#time-in-force
+    }
+    if order_type=='limit' or order_type=='stop_limit':
+        order['limit_price'] = BARS['avgPrice'].iloc[-1] # TODO: Need to be variable, and needs to be computed in strategy and fed in here.
+    if order_type=='stop_limit':
+        order['stop_price']  = BARS['avgPrice'].iloc[-1] # TODO: Need to be variable, and needs to be computed in strategy and fed in here. Should I round this?
+    return order
+
+# def submitOrder(order):
+
 
 async def trade(c, symbols: list[str], strategy, **strategy_kwargs):
     async with websockets.connect(c['stream_url']) as websocket:
         await authenticate(websocket, c)
         await subscribe(websocket, symbols)
-        BARS = initializeBars(nRows=5)
+        BARS = initializeBars(nRows=5, csv_path="price_history/"+sorted(os.listdir("price_history"))[-1])
         plt.ion(); axes=None
         async for timestamp, msg in receiveMessages(websocket):
             appendBars(BARS, timestamp, msg)
-            appendMove(BARS, strategy, **strategy_kwargs)
+            move = makeMove(BARS, strategy, **strategy_kwargs)
+            appendMove(BARS, move)
+            if move=="buy" or move=="sell":
+                order = buildOrder(symbols[0], move, BARS)
+                # submitOrder(order)
             axes = plotBars(BARS, axes, symbols)
 
 if __name__ == "__main__":
