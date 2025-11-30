@@ -13,6 +13,9 @@ from strategies import *
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import LimitOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
+from alpaca.trading.stream import TradingStream
+
+# CryptoHistoricalDataClient
 
 def loadConfig(configpath, mode):
     with open(configpath, 'r') as c: return json.load(c)[mode]
@@ -29,7 +32,7 @@ def initializeBars():
     }, index=pd.DatetimeIndex([], name='Timestamp'))
     return b
 
-def plotBars(BARS, axes, symbols, nBars=70):
+def plotBars(BARS, axes, symbols, asset_str, nBars=70):
     BarsToPlot = BARS.copy().iloc[-nBars:]
     textcolor = 'whitesmoke'
     candle_colors = mpf.make_marketcolors(up='#2d8b30', down='#a50f12', wick='silver', edge='silver', volume='blue')
@@ -42,7 +45,8 @@ def plotBars(BARS, axes, symbols, nBars=70):
         'sellScatter': {'type': 'scatter', 'markersize': 180, 'color': "tab:orange", 'marker': 'v', 'label': 'Sell'},
         'title'      : {'color': textcolor, 'fontsize': 16, 'fontweight': 'bold'},
         'labels'     : {'color': textcolor, 'fontsize': 14},
-        'tickmarks'  : {'colors': textcolor}
+        'tickmarks'  : {'colors': textcolor},
+        'asset_str'  : {'color': textcolor, 'fontsize': 12, 'ha': 'left'}
     }
     buy_markers  = np.where(BarsToPlot['move']=='buy' , BarsToPlot['avgPrice'], np.nan)
     sell_markers = np.where(BarsToPlot['move']=='sell', BarsToPlot['avgPrice'], np.nan)
@@ -62,6 +66,7 @@ def plotBars(BARS, axes, symbols, nBars=70):
         plotConfig['candle']['addplot'] = additional_plots
         mpf.plot(BarsToPlot[['Open', 'High', 'Low', 'Close', 'Volume']], **plotConfig['candle'])
         fig = axes[0].figure
+        fig.text(0.02, 0.96, asset_str, **plotConfig['asset_str'])
 
     # Style
     pos = axes[0].get_position()
@@ -82,7 +87,7 @@ def plotBars(BARS, axes, symbols, nBars=70):
 def appendBars(BARS, msg):
     timestamp = msg.timestamp.astimezone(ZoneInfo("America/New_York")).replace(tzinfo=None)
     message = {'Open': msg.open, 'High': msg.high, 'Low': msg.low, 'Close': msg.close, 'Volume': msg.volume, 'tradeCount': msg.trade_count, 'avgPrice': msg.vwap}
-    BARS.loc[timestamp, ['Open','High','Low','Close','Volume','avgPrice']] = message
+    BARS.loc[timestamp, ['Open', 'High', 'Low', 'Close', 'Volume', 'avgPrice']] = message
     # TODO: instead saving to csv and loading, just call the historical data.
     # BARS.to_csv(f"price_history/{BARS.index[0].strftime("%y%m%dT%H%M")}.csv", index=True)
 
@@ -93,16 +98,16 @@ def makeMove(BARS, strategy, **kwargs):
 
 def appendMove(BARS, move):
     BARS.loc[BARS.index[-1], 'move'] = move
-    print(BARS.index[-1], BARS.iloc[-1].to_dict())
+    print(BARS.iloc[-1].to_dict())
 
-def placeOrder(symbol, move, BARS, quantity='0.001'):
+def placeOrder(config, symbol, move, BARS, quantity=0.001):
     if   move=='sell': orderside = OrderSide.SELL
     elif move=='buy' : orderside = OrderSide.BUY
     limitPrice = BARS['avgPrice'].iloc[-1]
 
-    tradeClient = TradingClient(c['api-key'], c['secret-key'], paper=True)
-    account     = tradeClient.get_account()       # https://alpaca.markets/sdks/python/api_reference/trading/models.html#alpaca.trading.models.TradeAccount
-    positions   = tradeClient.get_all_positions() # https://alpaca.markets/sdks/python/api_reference/trading/models.html#alpaca.trading.models.Position
+    client    = TradingClient(config['api-key'], config['secret-key'], paper=True)
+    account   = client.get_account()          # https://alpaca.markets/sdks/python/api_reference/trading/models.html#alpaca.trading.models.TradeAccount
+    positions = client.get_all_positions()[0] # https://alpaca.markets/sdks/python/api_reference/trading/models.html#alpaca.trading.models.Position
 
     order = LimitOrderRequest(
         symbol=symbol, 
@@ -111,26 +116,56 @@ def placeOrder(symbol, move, BARS, quantity='0.001'):
         side=orderside,
         time_in_force=TimeInForce.GTC
     )
-    if (positions.qty_available>quantity and move=='sell')|(move=='buy' and account.buying_power >= quantity*limitPrice):
-        tradeClient.submit_order(order_data=order)
+    if (float(positions.qty_available)>quantity and move=='sell')|(move=='buy' and float(account.buying_power) >= quantity*limitPrice):
+        submitted = client.submit_order(order_data=order)
+        print(f"🔵 Order submitted! (ID: {submitted.id})")
 
-def trade(symbols, strategy, **strategy_kwargs):
+def trackOrder(config):
+    client = TradingClient(config['api-key'], config['secret-key'], paper=True)
+    orders = client.get_orders() # https://alpaca.markets/sdks/python/api_reference/trading/models.html#alpaca.trading.models.Order
+    print(f"nOrders: {len(orders)}")
+    for order in orders:
+        print(
+            f"id: {order.id}  "
+            f"symbol: {order.symbol}  "
+            f"side: {order.side.split('.')[-1]:<4}  "
+            f"qty: {order.qty}  "
+            f"type: {order.type.split('.')[-1]}  "
+            f"status: {order.status.split('.')[-1]:<20}  "
+            f"filled_qty: {order.filled_qty:<15}  "
+            f"filled_avg_price: {order.filled_avg_price}"
+        )
+
+def trackAsset(config):
+    client = TradingClient(config['api-key'], config['secret-key'], paper=True)
+    account = client.get_account()
+    positions = client.get_all_positions()[0]
+    asset_str = f"cash:{account.cash}    buying_power:{account.buying_power}    symbol:{positions.symbol}    qty:{positions.qty}    qty_available:{positions.qty_available}"
+    return asset_str
+
+def trade(config, symbols, strategy, **strategy_kwargs):
+    # This is where historical data logic goes in.
     BARS = initializeBars(); plt.ion(); axes=None
+    
     async def recieveMessages(msg):
-        nonlocal BARS, axes
+        nonlocal BARS, axes, config
         appendBars(BARS, msg)
         move = makeMove(BARS, strategy, **strategy_kwargs)
+        print(f"{'-'*100} {BARS.index[-1]} {'-'*100}")
         appendMove(BARS, move)
-        if move=="buy" or move=="sell":
-            placeOrder(symbols[0], move, BARS)
-        axes = plotBars(BARS, axes, args.symbols)
+        if move=="buy" or move=="sell": 
+            placeOrder(config, symbols[0], move, BARS)
+        trackOrder(config)
+        asset = trackAsset(config)
+        axes = plotBars(BARS, axes, args.symbols, asset)
+
     return recieveMessages
 
 def receiveData(msg, BARS):
     timestamp = msg.timestamp.astimezone(ZoneInfo("America/New_York")).replace(tzinfo=None)
     message = {'Open': msg.open, 'High': msg.high, 'Low': msg.low, 'Close': msg.close, 'Volume': msg.volume, 'tradeCount': msg.trade_count, 'avgPrice': msg.vwap}
     BARS.loc[timestamp, ['Open','High','Low','Close','Volume','avgPrice']] = message
-    BARS.to_csv(f"price_history/{BARS.index[0].strftime("%y%m%dT%H%M")}.csv", index=True)
+    # BARS.to_csv(f"price_history/{BARS.index[0].strftime("%y%m%dT%H%M")}.csv", index=True)
 
 if __name__ == "__main__":
     parser = ArgumentParser(prog='websocket.py', epilog="jkil@nd.edu")
@@ -142,5 +177,5 @@ if __name__ == "__main__":
     scriptPath = os.path.dirname(os.path.abspath(__file__))
     c = loadConfig(f"{scriptPath}/config.json", args.mode)
     client = CryptoDataStream(c['api-key'], c['secret-key'])
-    client.subscribe_bars(trade(args.symbols, strategy_map[args.strategy]), "BTC/USD")
+    client.subscribe_bars(trade(c, args.symbols, strategy_map[args.strategy]), "BTC/USD")
     client.run()
