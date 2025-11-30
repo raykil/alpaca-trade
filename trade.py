@@ -1,57 +1,33 @@
-"""
-Usage: python trade.py -s reverse_momentum
-"""
+# https://alpaca.markets/sdks/python/market_data.html
 
-import os, json, asyncio, websockets
+import os, json
 import numpy as np
 import pandas as pd
 import mplfinance as mpf
 import matplotlib.pyplot as plt
-from datetime import datetime
 from zoneinfo import ZoneInfo
 from argparse import ArgumentParser
+from alpaca.data.live import CryptoDataStream
 from strategies import *
+
+from alpaca.trading.client import TradingClient
+from alpaca.trading.requests import LimitOrderRequest
+from alpaca.trading.enums import OrderSide, TimeInForce
 
 def loadConfig(configpath, mode):
     with open(configpath, 'r') as c: return json.load(c)[mode]
-    
-async def authenticate(websocket, c):
-    auth_msg = {"action": 'auth', "key": c['key_id'], "secret": c['secret_key']}
-    await websocket.send(json.dumps(auth_msg))
 
-async def subscribe(websocket, symbols: list[str]):
-    subscribe_msg = {"action": 'subscribe', "bars": symbols} # "updatedBars": symbols
-    await websocket.send(json.dumps(subscribe_msg))
-
-def initializeBars(csv_path=None, nRows=None):
-    if csv_path:
-        b = pd.read_csv(csv_path, parse_dates=['Timestamp'], index_col='Timestamp').tail(nRows)
-    else:
-        b = pd.DataFrame({
-            'Open':     pd.Series(dtype='float64'),
-            'High':     pd.Series(dtype='float64'),
-            'Low':      pd.Series(dtype='float64'),
-            'Close':    pd.Series(dtype='float64'),
-            'Volume':   pd.Series(dtype='float64'),
-            'avgPrice': pd.Series(dtype='float64'),
-            'move':     pd.Series(dtype='string')
-        }, index=pd.DatetimeIndex([], name='Timestamp'))
+def initializeBars():
+    b = pd.DataFrame({
+        'Open':     pd.Series(dtype='float64'),
+        'High':     pd.Series(dtype='float64'),
+        'Low':      pd.Series(dtype='float64'),
+        'Close':    pd.Series(dtype='float64'),
+        'Volume':   pd.Series(dtype='float64'),
+        'avgPrice': pd.Series(dtype='float64'),
+        'move':     pd.Series(dtype='string')
+    }, index=pd.DatetimeIndex([], name='Timestamp'))
     return b
-
-async def receiveMessages(websocket):
-    async for messages in websocket:
-        for msg in json.loads(messages):
-            if   msg['T']=='success' and msg['msg']=='connected'    : print("✅ Connection successful!")
-            elif msg['T']=='success' and msg['msg']=='authenticated': print("✅ Authentication successful!")
-            elif msg['T']=='subscription': print("✅ Subscribed to:", {k: v for k, v in msg.items() if isinstance(v, list) and v})
-            elif (msg['T']=='b')|(msg['T']=='u'):
-                timestamp = datetime.fromisoformat(msg['t']).astimezone(ZoneInfo("America/New_York")).replace(tzinfo=None)
-                message = {'Open': msg['o'], 'High': msg['h'], 'Low': msg['l'], 'Close': msg['c'], 'Volume': msg['v'], 'avgPrice': msg['vw']}
-                yield timestamp, message
-
-def appendBars(BARS, timestamp, msg):
-    BARS.loc[timestamp, ['Open','High','Low','Close','Volume','avgPrice']] = msg
-    BARS.to_csv(f"price_history/{BARS.index[0].strftime("%y%m%dT%H%M")}.csv", index=True)
 
 def plotBars(BARS, axes, symbols, nBars=70):
     BarsToPlot = BARS.copy().iloc[-nBars:]
@@ -103,53 +79,68 @@ def plotBars(BARS, axes, symbols, nBars=70):
     plt.pause(0.001)
     return axes
 
+def appendBars(BARS, msg):
+    timestamp = msg.timestamp.astimezone(ZoneInfo("America/New_York")).replace(tzinfo=None)
+    message = {'Open': msg.open, 'High': msg.high, 'Low': msg.low, 'Close': msg.close, 'Volume': msg.volume, 'tradeCount': msg.trade_count, 'avgPrice': msg.vwap}
+    BARS.loc[timestamp, ['Open','High','Low','Close','Volume','avgPrice']] = message
+    # TODO: instead saving to csv and loading, just call the historical data.
+    # BARS.to_csv(f"price_history/{BARS.index[0].strftime("%y%m%dT%H%M")}.csv", index=True)
+
 def makeMove(BARS, strategy, **kwargs):
+    # TODO: make it into move dict including all necessary info about building an order.
     move = strategy(BARS, **kwargs)
     return move
 
 def appendMove(BARS, move):
     BARS.loc[BARS.index[-1], 'move'] = move
-    print(BARS.iloc[-1].to_dict())
+    print(BARS.index[-1], BARS.iloc[-1].to_dict())
 
-def buildOrder(symbol, move, BARS, order_type='limit', qty='0.001'):
-    order = {
-        "symbol": symbol,
-        "side"  : move,
-        "type"  : order_type, # this func should accept type, and strategy should determine and return type.
-        "qty"   : qty,
-        "time_in_force": 'gtc' # https://docs.alpaca.markets/docs/orders-at-alpaca#time-in-force
-    }
-    if order_type=='limit' or order_type=='stop_limit':
-        order['limit_price'] = BARS['avgPrice'].iloc[-1] # TODO: Need to be variable, and needs to be computed in strategy and fed in here.
-    if order_type=='stop_limit':
-        order['stop_price']  = BARS['avgPrice'].iloc[-1] # TODO: Need to be variable, and needs to be computed in strategy and fed in here. Should I round this?
-    return order
+def placeOrder(symbol, move, BARS, quantity='0.001'):
+    if   move=='sell': orderside = OrderSide.SELL
+    elif move=='buy' : orderside = OrderSide.BUY
+    limitPrice = BARS['avgPrice'].iloc[-1]
 
-# def submitOrder(order):
+    tradeClient = TradingClient(c['api-key'], c['secret-key'], paper=True)
+    account     = tradeClient.get_account()       # https://alpaca.markets/sdks/python/api_reference/trading/models.html#alpaca.trading.models.TradeAccount
+    positions   = tradeClient.get_all_positions() # https://alpaca.markets/sdks/python/api_reference/trading/models.html#alpaca.trading.models.Position
 
+    order = LimitOrderRequest(
+        symbol=symbol, 
+        limit_price=limitPrice,
+        qty=quantity,
+        side=orderside,
+        time_in_force=TimeInForce.GTC
+    )
+    if (positions.qty_available>quantity and move=='sell')|(move=='buy' and account.buying_power >= quantity*limitPrice):
+        tradeClient.submit_order(order_data=order)
 
-async def trade(c, symbols: list[str], strategy, **strategy_kwargs):
-    async with websockets.connect(c['stream_url']) as websocket:
-        await authenticate(websocket, c)
-        await subscribe(websocket, symbols)
-        BARS = initializeBars(nRows=5, csv_path="price_history/"+sorted(os.listdir("price_history"))[-1])
-        plt.ion(); axes=None
-        async for timestamp, msg in receiveMessages(websocket):
-            appendBars(BARS, timestamp, msg)
-            move = makeMove(BARS, strategy, **strategy_kwargs)
-            appendMove(BARS, move)
-            if move=="buy" or move=="sell":
-                order = buildOrder(symbols[0], move, BARS)
-                # submitOrder(order)
-            axes = plotBars(BARS, axes, symbols)
+def trade(symbols, strategy, **strategy_kwargs):
+    BARS = initializeBars(); plt.ion(); axes=None
+    async def recieveMessages(msg):
+        nonlocal BARS, axes
+        appendBars(BARS, msg)
+        move = makeMove(BARS, strategy, **strategy_kwargs)
+        appendMove(BARS, move)
+        if move=="buy" or move=="sell":
+            placeOrder(symbols[0], move, BARS)
+        axes = plotBars(BARS, axes, args.symbols)
+    return recieveMessages
+
+def receiveData(msg, BARS):
+    timestamp = msg.timestamp.astimezone(ZoneInfo("America/New_York")).replace(tzinfo=None)
+    message = {'Open': msg.open, 'High': msg.high, 'Low': msg.low, 'Close': msg.close, 'Volume': msg.volume, 'tradeCount': msg.trade_count, 'avgPrice': msg.vwap}
+    BARS.loc[timestamp, ['Open','High','Low','Close','Volume','avgPrice']] = message
+    BARS.to_csv(f"price_history/{BARS.index[0].strftime("%y%m%dT%H%M")}.csv", index=True)
 
 if __name__ == "__main__":
     parser = ArgumentParser(prog='websocket.py', epilog="jkil@nd.edu")
     parser.add_argument('-m', '--mode'    , default="crypto_paper", type=str , help="Keys in config.json. Options: paper, live, crypto_paper.")
-    parser.add_argument('-s', '--strategy', default="momentum"    , type=str , help="Options: momentum only for now")
+    parser.add_argument('-s', '--strategy', default="reverse_momentum"    , type=str , help="Options: momentum only for now")
     parser.add_argument('-t', '--symbols' , default=["BTC/USD"])
     args = parser.parse_args()
 
     scriptPath = os.path.dirname(os.path.abspath(__file__))
-    config = loadConfig(f"{scriptPath}/config.json", args.mode)
-    asyncio.run(trade(config, args.symbols, strategy_map[args.strategy]))
+    c = loadConfig(f"{scriptPath}/config.json", args.mode)
+    client = CryptoDataStream(c['api-key'], c['secret-key'])
+    client.subscribe_bars(trade(args.symbols, strategy_map[args.strategy]), "BTC/USD")
+    client.run()
