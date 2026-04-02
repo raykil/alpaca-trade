@@ -4,3 +4,11 @@ config.json
 notes/
 archive/
 .vscode/
+helps/
+data/
+__pycache__/
+*.log
+*.png
+*.csv
+datetime_help.txt
+new_datetime_help.txt
