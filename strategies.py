@@ -46,8 +46,8 @@ def momentum_v2(BARS, window=3, threshold=150, qty=0.001):
     return {'move': move, 'qty': qty, 'limit_price': current_price}
 
 strategy_map = {
-    'momentum': momentum,
-    'momentum_v2': momentum_v2,
+    'momentum':         momentum,
+    'momentum_v2':      momentum_v2,
     'reverse_momentum': reverse_momentum,
-    'order_test': order_test
+    'order_test':       order_test,
 }

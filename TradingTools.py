@@ -6,6 +6,7 @@ from alpaca.data import CryptoHistoricalDataClient
 from alpaca.data.requests import CryptoBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
+
 def receiveHistoricalData(symbol, duration=70, scale='minutes'):
     client = CryptoHistoricalDataClient()
     tf = datetime.now(timezone.utc)

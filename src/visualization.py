@@ -49,7 +49,6 @@ def plotBars(BARS, axes=None, asset_str=None):
     mpf.plot(display, ax=ax1, volume=ax2, type='candle', style=style)
 
     order_bars = display[display['order_qty'].notna()]
-    unfilled_lines = []
     for ts, row in order_bars.iterrows():
         x      = display.index.get_loc(ts)
         y      = row['order_limit_price']
@@ -76,3 +75,4 @@ def plotBars(BARS, axes=None, asset_str=None):
 
     plt.pause(0.001)
     return axes
+

@@ -5,10 +5,10 @@ from argparse import ArgumentParser
 from alpaca.data.live.crypto import CryptoDataStream
 
 from src.utils import loadConfig
-from src.data import receiveHistoricalData, initializeBars
+from TradingTools import receiveHistoricalData, initializeBars
 from src.visualization import appendBars, plotBars
 from src.execution import makeMove, appendMove, placeOrder, trackOrder, trackAsset
-from src.strategies import strategy_map
+from strategies import strategy_map
 
 def trade(config, symbol, strategy, **strategy_kwargs):
     HistoricalData = receiveHistoricalData(symbol, duration=60)
