@@ -20,8 +20,8 @@ if __name__ == '__main__':
     BARS           = initializeBars(HistoricalData)
     strategy       = strategy_map[args.strategy]
 
-    trade_log, equity_curve = run_backtest(BARS, strategy, initial_cash=args.cash)
-    metrics                 = compute_metrics(trade_log, equity_curve, initial_cash=args.cash)
+    tradeLog, equityCurve = run_backtest(BARS, strategy, initial_cash=args.cash)
+    metrics                 = compute_metrics(tradeLog, equityCurve, initial_cash=args.cash)
 
     print(f"\n{'='*44}")
     print(f"  Strategy    : {args.strategy}")
@@ -35,4 +35,4 @@ if __name__ == '__main__':
     print(f"  Final value : ${metrics['final_value']:,.2f}")
     print(f"{'='*44}\n")
 
-    plotBacktest(BARS, trade_log, equity_curve, metrics, args.symbol, args.strategy)
+    plotBacktest(BARS, tradeLog, equityCurve, metrics, args.symbol, args.strategy)

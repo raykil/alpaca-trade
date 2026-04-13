@@ -2,80 +2,87 @@ import pandas as pd
 import mplfinance as mpf
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
-
 from src.visualization import figureStyle
 
+def OrderBuy(order, bar_index, BARS, cash, quantity, tradeLog, remainingOrders):
+    cost = order['limit_price'] * order['qty']
+    if cash >= cost:
+        cash -= cost
+        quantity += order['qty']
+        tradeLog.append({ # assumes all order is filled exactly at limit price (conservative, which is good) at the moment, all or nothing. It's good assumption for now.
+            'timestamp': BARS.index[bar_index], 
+            'side': 'buy', 
+            'qty': order['qty'], 
+            'price': order['limit_price']
+        })
+    else:
+        remainingOrders.append(order)  # can't afford — keep pending
+    return cash, quantity
+
+def OrderSell(order, bar_index, BARS, cash, quantity, tradeLog):
+    sell_qty = min(order['qty'], quantity)
+    if sell_qty > 0:
+        cash += order['limit_price'] * sell_qty
+        quantity -= sell_qty
+        tradeLog.append({
+            'timestamp': BARS.index[bar_index], 
+            'side': 'sell', 
+            'qty': sell_qty, 
+            'price': order['limit_price']
+        })
+    return cash, quantity
 
 def run_backtest(BARS, strategy, initial_cash=100_000.0, **strategy_kwargs):
-    """
-    Simulate a strategy over historical BARS.
-    Orders placed on bar i are checked for fills starting on bar i+1 (no lookahead).
-    Limit buy fills when bar Low <= limit_price; limit sell fills when bar High >= limit_price.
-
-    Returns:
-        trade_log    — list of fill dicts: {timestamp, side, qty, price}
-        equity_curve — pd.Series of portfolio value after each bar
-    """
-    cash    = initial_cash
-    qty     = 0.0
-    pending = []   # list of {side, qty, limit_price}
-    trade_log   = []
-    equity_vals = []
+    # Initialize assets
+    cash          = initial_cash
+    quantity      = 0.0
+    pendingOrders = [] # list of {side, qty, limit_price}. Limit price: execute order iff the price I suggested is better.
+    tradeLog      = []
+    equityValue   = []
 
     for i in range(1, len(BARS)):
         bar = BARS.iloc[i]
 
-        # 1. Check pending GTC (Good Til Canceled) limit orders against this bar
-        remaining = []
-        for order in pending:
-            if order['side'] == 'buy' and bar['Low'] <= order['limit_price']:
-                cost = order['limit_price'] * order['qty']
-                if cash >= cost:
-                    cash -= cost
-                    qty  += order['qty']
-                    trade_log.append({'timestamp': BARS.index[i], 'side': 'buy', 'qty': order['qty'], 'price': order['limit_price']})
-                else:
-                    remaining.append(order)  # can't afford — keep pending
-            elif order['side'] == 'sell' and bar['High'] >= order['limit_price']:
-                sell_qty = min(order['qty'], qty)
-                if sell_qty > 0:
-                    cash += order['limit_price'] * sell_qty
-                    qty  -= sell_qty
-                    trade_log.append({'timestamp': BARS.index[i], 'side': 'sell', 'qty': sell_qty, 'price': order['limit_price']})
-            else:
-                remaining.append(order)
-        pending = remaining
+        # Check pending orders
+        remainingOrders = []
+        for order in pendingOrders:
+            goodToBuy  = order['side'] == 'buy'  and bar['Low']  <= order['limit_price']
+            goodToSell = order['side'] == 'sell' and bar['High'] >= order['limit_price']
+            if    goodToBuy : cash, quantity = OrderBuy(order, i, BARS, cash, quantity, tradeLog, remainingOrders)
+            elif  goodToSell: cash, quantity = OrderSell(order, i, BARS, cash, quantity, tradeLog)
+            else: remainingOrders.append(order)
+        pendingOrders = remainingOrders
 
-        # 2. Run strategy on all bars up to and including bar i
-        order_info = strategy(BARS.iloc[:i + 1], **strategy_kwargs)
-        if order_info['move'] in ('buy', 'sell'):
-            pending.append({
-                'side':        order_info['move'],
-                'qty':         order_info['qty'],
-                'limit_price': order_info['limit_price'],
+        # Run strategy and make orders if appropriate
+        orderInfo = strategy(BARS.iloc[:i + 1], **strategy_kwargs)
+        if orderInfo['move'] in ('buy', 'sell'):
+            pendingOrders.append({
+                'side':        orderInfo['move'],
+                'qty':         orderInfo['qty'],
+                'limit_price': orderInfo['limit_price'],
             })
 
-        # 3. Record portfolio value
-        equity_vals.append(cash + qty * bar['Close'])
+        # Record portfolio value
+        equityValue.append(cash + quantity * bar['Close'])
 
-    equity_curve = pd.Series(equity_vals, index=BARS.index[1:], name='equity')
-    return trade_log, equity_curve
+    equityCurve = pd.Series(equityValue, index=BARS.index[1:], name='equity')
+    return tradeLog, equityCurve
 
 
-def compute_metrics(trade_log, equity_curve, initial_cash):
-    final_value  = equity_curve.iloc[-1]
+def compute_metrics(tradeLog, equityCurve, initial_cash):
+    final_value  = equityCurve.iloc[-1]
     total_return = (final_value - initial_cash) / initial_cash * 100
 
-    rolling_max  = equity_curve.cummax()
-    max_drawdown = ((equity_curve - rolling_max) / rolling_max).min() * 100
+    rolling_max  = equityCurve.cummax()
+    max_drawdown = ((equityCurve - rolling_max) / rolling_max).min() * 100
 
-    bar_returns  = equity_curve.pct_change().dropna()
+    bar_returns  = equityCurve.pct_change().dropna()
     sharpe       = (bar_returns.mean() / bar_returns.std()
                     if bar_returns.std() > 0 else 0.0)
 
     # Win rate: pair buys and sells FIFO into round trips
-    buys  = [t['price'] for t in trade_log if t['side'] == 'buy']
-    sells = [t['price'] for t in trade_log if t['side'] == 'sell']
+    buys  = [t['price'] for t in tradeLog if t['side'] == 'buy']
+    sells = [t['price'] for t in tradeLog if t['side'] == 'sell']
     pairs = list(zip(buys, sells))
     win_rate = (sum(1 for b, s in pairs if s > b) / len(pairs) * 100) if pairs else 0.0
 
@@ -84,12 +91,12 @@ def compute_metrics(trade_log, equity_curve, initial_cash):
         'max_drawdown_pct': round(max_drawdown, 2),
         'sharpe_ratio':     round(sharpe, 3),
         'win_rate_pct':     round(win_rate, 1),
-        'n_trades':         len(trade_log),
+        'n_trades':         len(tradeLog),
         'final_value':      round(final_value, 2),
     }
 
 
-def plotBacktest(BARS, trade_log, equity_curve, metrics, symbol='BTC/USD', strategy_name=''):
+def plotBacktest(BARS, tradeLog, equityCurve, metrics, symbol='BTC/USD', strategy_name=''):
     style = figureStyle()
     fig = mpf.figure(style=style, figsize=(16, 11))
     fig.suptitle(f"{symbol}  —  {strategy_name}")
@@ -105,7 +112,7 @@ def plotBacktest(BARS, trade_log, equity_curve, metrics, symbol='BTC/USD', strat
     mpf.plot(BARS, ax=ax1, volume=ax2, type='candle', style=style)
 
     # Trade markers
-    for trade in trade_log:
+    for trade in tradeLog:
         ts = trade['timestamp']
         if ts not in BARS.index:
             continue
@@ -123,7 +130,7 @@ def plotBacktest(BARS, trade_log, equity_curve, metrics, symbol='BTC/USD', strat
                facecolor='#22272d', edgecolor='#39424c', labelcolor='whitesmoke')
 
     # Equity curve
-    ax3.plot(range(len(equity_curve)), equity_curve.values, color='#58a6ff', linewidth=1)
+    ax3.plot(range(len(equityCurve)), equityCurve.values, color='#58a6ff', linewidth=1)
     ax3.set_ylabel('Portfolio $', color='whitesmoke', fontsize=10)
     ax3.tick_params(colors='whitesmoke')
     ax3.set_facecolor('#22272d')
