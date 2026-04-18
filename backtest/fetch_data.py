@@ -10,12 +10,12 @@ OUTPUT_DIR   = os.path.join(os.path.dirname(__file__), 'HistoricalData')
 
 if __name__ == '__main__':
     parser = ArgumentParser(prog='fetch_data.py', description='Fetch historical bars and save to a CSV for backtesting.', epilog='jkil@nd.edu')
-    parser.add_argument('-t', '--symbol',   required=True,    type=str, help='Symbol to fetch, e.g. BTC/USD')
-    parser.add_argument('-d', '--duration', default=500,      type=int, help='Number of bars to fetch (ignored if -i/-f given)')
-    parser.add_argument('-s', '--size',     default='minute', type=str, choices=VALID_SCALES, help='Bar size: minute or day')
-    parser.add_argument('-o', '--output',   default=None,     type=str, help='Output filename (default: auto-generated)')
-    parser.add_argument('-i', '--initial',  default=None,     type=str, help='Start time in UTC: "YYYY-MM-DD HH:MM"')
-    parser.add_argument('-f', '--final',    default=None,     type=str, help='End time in UTC: "YYYY-MM-DD HH:MM"')
+    parser.add_argument('-t', '--symbol'  , required=True   , type=str, help='Symbol to fetch, e.g. BTC/USD')
+    parser.add_argument('-d', '--duration', default=500     , type=int, help='Number of bars to fetch (ignored if -i/-f given)')
+    parser.add_argument('-s', '--size'    , default='minute', type=str, choices=VALID_SCALES, help='Bar size: minute or day')
+    parser.add_argument('-o', '--output'  , default=None    , type=str, help='Output filename (default: auto-generated)')
+    parser.add_argument('-i', '--initial' , default=None    , type=str, help='Start time in UTC: "YYYY-MM-DD HH:MM"')
+    parser.add_argument('-f', '--final'   , default=None    , type=str, help='End time in UTC: "YYYY-MM-DD HH:MM"')
     args = parser.parse_args()
 
     if bool(args.initial) != bool(args.final):

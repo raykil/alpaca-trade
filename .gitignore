@@ -1,4 +1,4 @@
-**/*_v1*
+**/*_v*
 config.json
 notes/
 archive/
@@ -9,5 +9,4 @@ __pycache__/
 *.log
 *.png
 *.csv
-datetime_help.txt
-new_datetime_help.txt
+**/*results*

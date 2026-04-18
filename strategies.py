@@ -1,19 +1,19 @@
-def momentum(BARS, window=3, threshold=150, qty=0.001):
+def momentum(BARS, window=3, threshold=0.001, qty=0.001):
     avgPrices = BARS['avgPrice'].to_numpy()
     current_price = float(avgPrices[-1])
     move = 'hold'
     if len(avgPrices) >= window:
-        delta_p = avgPrices[-1] - avgPrices[-window]
+        delta_p = (avgPrices[-1] - avgPrices[-window]) / avgPrices[-window]
         if   (delta_p >  threshold): move = 'buy'
         elif (delta_p < -threshold): move = 'sell'
     return {'move': move, 'qty': qty, 'limit_price': current_price}
 
-def reverse_momentum(BARS, window=5, threshold=150, qty=0.001):
+def reverse_momentum(BARS, window=5, threshold=0.001, qty=0.001):
     avgPrices = BARS['avgPrice'].to_numpy()
     current_price = float(avgPrices[-1])
     move = 'hold'
     if len(avgPrices) >= window:
-        delta_p = avgPrices[-1] - avgPrices[-window]
+        delta_p = (avgPrices[-1] - avgPrices[-window]) / avgPrices[-window]
         if   (delta_p >  threshold): move = 'sell'
         elif (delta_p < -threshold): move = 'buy'
     return {'move': move, 'qty': qty, 'limit_price': current_price}
@@ -30,7 +30,7 @@ def order_test(BARS, qty=0.001):
     elif avgPrices[-2] > avgPrices[-1]: move = 'buy'
     return {'move': move, 'qty': qty, 'limit_price': current_price}
 
-def momentum_v2(BARS, window=3, threshold=150, qty=0.001):
+def momentum_v2(BARS, window=3, threshold=0.001, qty=0.001):
     """
     Like momentum, but returns a dict with order fields instead of just a move string.
     - limit_price: current avgPrice (the price you're willing to buy/sell at)
@@ -40,7 +40,7 @@ def momentum_v2(BARS, window=3, threshold=150, qty=0.001):
     current_price = float(avgPrices[-1])
     move = 'hold'
     if len(avgPrices) >= window:
-        delta_p = avgPrices[-1] - avgPrices[-window]
+        delta_p = (avgPrices[-1] - avgPrices[-window]) / avgPrices[-window]
         if   delta_p >  threshold: move = 'buy'
         elif delta_p < -threshold: move = 'sell'
     return {'move': move, 'qty': qty, 'limit_price': current_price}

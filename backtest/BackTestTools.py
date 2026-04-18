@@ -1,8 +1,14 @@
+import os, json
 import pandas as pd
 import mplfinance as mpf
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
+import matplotlib.ticker as mticker
 from src.visualization import figureStyle
+
+RESULTS_DIR = os.path.join(os.path.dirname(__file__), 'results')
+JSONS_DIR   = os.path.join(RESULTS_DIR, 'jsons')
+PLOTS_DIR   = os.path.join(RESULTS_DIR, 'plots')
 
 def OrderBuy(order, bar_index, BARS, cash, quantity, tradeLog, remainingOrders):
     cost = order['limit_price'] * order['qty']
@@ -77,8 +83,7 @@ def compute_metrics(tradeLog, equityCurve, initial_cash):
     max_drawdown = ((equityCurve - rolling_max) / rolling_max).min() * 100
 
     bar_returns  = equityCurve.pct_change().dropna()
-    sharpe       = (bar_returns.mean() / bar_returns.std()
-                    if bar_returns.std() > 0 else 0.0)
+    sharpe       = (bar_returns.mean() / bar_returns.std() if bar_returns.std() > 0 else 0.0)
 
     # Win rate: pair buys and sells FIFO into round trips
     buys  = [t['price'] for t in tradeLog if t['side'] == 'buy']
@@ -87,7 +92,7 @@ def compute_metrics(tradeLog, equityCurve, initial_cash):
     win_rate = (sum(1 for b, s in pairs if s > b) / len(pairs) * 100) if pairs else 0.0
 
     return {
-        'total_return_pct': round(total_return, 2),
+        'total_return_pct': round(total_return, 4),
         'max_drawdown_pct': round(max_drawdown, 2),
         'sharpe_ratio':     round(sharpe, 3),
         'win_rate_pct':     round(win_rate, 1),
@@ -138,7 +143,7 @@ def plotBacktest(BARS, tradeLog, equityCurve, metrics, symbol='BTC/USD', strateg
 
     # Metrics bar at the bottom
     m = metrics
-    metrics_str = (f"Return: {m['total_return_pct']:+.2f}%    "
+    metrics_str = (f"Return: {m['total_return_pct']:+.3f}%    "
                    f"Max drawdown: {m['max_drawdown_pct']:.2f}%    "
                    f"Sharpe: {m['sharpe_ratio']:.3f}    "
                    f"Win rate: {m['win_rate_pct']:.1f}%    "
@@ -148,3 +153,81 @@ def plotBacktest(BARS, tradeLog, equityCurve, metrics, symbol='BTC/USD', strateg
              bbox=dict(boxstyle='round,pad=0.4', facecolor='#22272d', edgecolor='#39424c', alpha=0.9))
 
     plt.show()
+
+def save_results(BARS, tradeLog, equityCurve, metrics, symbol, strategy_name, initial_cash=100_000.0):
+    t_start      = pd.Timestamp(BARS.index[0])
+    t_end        = pd.Timestamp(BARS.index[-1])
+    start_str    = t_start.strftime('%y%m%d_%H%M')
+    end_str      = t_end.strftime('%H%M') if t_start.date() == t_end.date() else t_end.strftime('%y%m%d_%H%M')
+    timeframe    = f"{start_str}-{end_str}"
+    symbol_clean = symbol.replace('/', '-')
+    os.makedirs(JSONS_DIR, exist_ok=True)
+    os.makedirs(PLOTS_DIR, exist_ok=True)
+
+    filepath = os.path.join(JSONS_DIR, f"{symbol_clean}_{strategy_name}_{timeframe}.json")
+    data = {
+        'metrics': metrics,
+        'trades':  [{**t, 'timestamp': str(t['timestamp'])} for t in tradeLog],
+        'equity':  [{'timestamp': str(ts), 'value': v} for ts, v in equityCurve.items()],
+    }
+    with open(filepath, 'w') as f:
+        json.dump(data, f, indent=2)
+    print(f"json saved to {os.path.relpath(filepath)}!")
+
+    # Build a complete regular time grid so gaps appear as blanks
+    bar_freq   = pd.Series(BARS.index).diff().dropna().mode()[0]
+    full_index = pd.date_range(BARS.index[0], BARS.index[-1], freq=bar_freq)
+    BARS_plot  = BARS.reindex(full_index)
+    eq_plot    = equityCurve.reindex(full_index[1:])  # equity starts at bar 1
+
+    style = figureStyle()
+    fig = mpf.figure(style=style, figsize=(16, 8))
+    fig.suptitle(f"{symbol}  —  {strategy_name}", color='whitesmoke')
+    fig.subplots_adjust(left=0.08, right=0.98, top=0.93, bottom=0.12, hspace=0.35)
+
+    gs    = fig.add_gridspec(2, 1, height_ratios=[3, 1])
+    ax1   = fig.add_subplot(gs[0])
+    ax_eq = fig.add_subplot(gs[1], sharex=ax1)
+
+    mpf.plot(BARS_plot, ax=ax1, type='candle', style=style, ylabel='Price ($)')
+
+    for trade in tradeLog:
+        ts = trade['timestamp']
+        if ts not in full_index:
+            continue
+        x      = full_index.get_loc(ts)
+        is_buy = trade['side'] == 'buy'
+        ax1.plot(x, trade['price'],
+                 marker='^' if is_buy else 'v',
+                 color='#00e676' if is_buy else '#ff5252',
+                 markersize=8, zorder=5, linestyle='None')
+
+    buy_handle  = mlines.Line2D([], [], marker='^', color='#00e676', linestyle='None', markersize=8, label='Buy fill')
+    sell_handle = mlines.Line2D([], [], marker='v', color='#ff5252', linestyle='None', markersize=8, label='Sell fill')
+    ax1.legend(handles=[buy_handle, sell_handle],
+               loc='upper left', framealpha=0.6,
+               facecolor='#22272d', edgecolor='#39424c', labelcolor='whitesmoke')
+
+    ax_eq.plot(range(len(eq_plot)), eq_plot.values - initial_cash, color='#58a6ff', linewidth=1)
+    ax_eq.set_ylabel('Portfolio ($)', color='whitesmoke', fontsize=10)
+    ax_eq.tick_params(colors='whitesmoke')
+    ax_eq.set_facecolor('#22272d')
+    ax_eq.grid(True, linestyle='--', color='#39424c', linewidth=0.5)
+    ax_eq.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'${x:,.0f}'))
+    ax_eq.axhline(0, color='#ff5252', linestyle=':', linewidth=1.2, alpha=0.7)
+    ax1.tick_params(labelbottom=True)
+
+    m = metrics
+    metrics_str = (f"Return: {m['total_return_pct']:+.3f}%    "
+                   f"Max drawdown: {m['max_drawdown_pct']:.2f}%    "
+                   f"Sharpe: {m['sharpe_ratio']:.3f}    "
+                   f"Win rate: {m['win_rate_pct']:.1f}%    "
+                   f"Trades: {m['n_trades']}    "
+                   f"Final: ${m['final_value']:,.2f}")
+    fig.text(0.5, 0.01, metrics_str, ha='center', color='whitesmoke', fontsize=10,
+             bbox=dict(boxstyle='round,pad=0.4', facecolor='#22272d', edgecolor='#39424c', alpha=0.9))
+
+    png_path = os.path.join(PLOTS_DIR, f"{symbol_clean}_{strategy_name}_{timeframe}.png")
+    fig.savefig(png_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"plot saved to {os.path.relpath(png_path)}!")
