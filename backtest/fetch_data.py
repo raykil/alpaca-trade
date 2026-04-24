@@ -35,8 +35,10 @@ if __name__ == '__main__':
         filepath = args.output if os.path.isabs(args.output) else os.path.join(OUTPUT_DIR, args.output)
     else:
         symbol_clean = args.symbol.replace('/', '-')
-        timestamp    = datetime.now().strftime('%Y%m%d_%H%M')
-        filename     = f"{symbol_clean}_{args.duration}{args.size[0]}_{timestamp}.csv"
+        t_start      = BARS.index[0].strftime('%y%m%d_%H%M')
+        t_end        = BARS.index[-1].strftime('%y%m%d_%H%M')
+        granularity  = '1min' if args.size == 'minute' else '1day'
+        filename     = f"{symbol_clean}_{t_start}-{t_end}_{granularity}.csv"
         filepath     = os.path.join(OUTPUT_DIR, filename)
 
     save_bars(BARS, filepath)
