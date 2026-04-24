@@ -1,4 +1,4 @@
-import os, sys, json
+import os, sys, json, webbrowser
 from argparse import ArgumentParser
 
 scriptPath = os.path.dirname(os.path.abspath(__file__))
@@ -29,4 +29,5 @@ if __name__ == '__main__':
     # ————— Run backtest —————————————————————————————————————————————————————————————
     tradeLog, equityCurve = run_backtest(BARS, strategy, initial_cash=args.cash, **strategy_kwargs)
     metrics = compute_metrics(tradeLog, equityCurve, initial_cash=args.cash)
-    save_results(BARS, equityCurve, args.symbol, args.strategy)
+    html_path = save_results(BARS, equityCurve, args.symbol, args.strategy)
+    webbrowser.open(f"file://{html_path}")

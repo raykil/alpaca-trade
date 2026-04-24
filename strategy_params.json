@@ -1,0 +1,23 @@
+{
+    "momentum": {
+        "window":    3,
+        "threshold": 0.001,
+        "qty":       0.001
+    },
+    "reverse_momentum": {
+        "window":    5,
+        "threshold": 0.001,
+        "qty":       0.001
+    },
+    "rsi_bb_reversion": {
+        "rsi_period":    14,
+        "bb_period":     20,
+        "bb_std":        2.0,
+        "rsi_oversold":  30,
+        "rsi_overbought":70,
+        "qty":           0.001
+    },
+    "order_test": {
+        "qty": 0.001
+    }
+}

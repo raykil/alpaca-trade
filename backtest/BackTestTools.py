@@ -1,6 +1,5 @@
-import os
+import os, matplotlib
 from contextlib import contextmanager
-import matplotlib
 import pandas as pd
 import quantstats as qs
 
@@ -98,9 +97,7 @@ def _inject_dark_css(html_path):
     with open(html_path, 'w', encoding='utf-8') as f:
         f.write(html)
 
-RESULTS_DIR = os.path.join(os.path.dirname(__file__), 'results')
-# JSONS_DIR   = os.path.join(RESULTS_DIR, 'jsons')
-# PLOTS_DIR   = os.path.join(RESULTS_DIR, 'plots')
+outputPath = os.path.join(os.path.dirname(__file__), 'results')
 
 def OrderBuy(order, timestamp, cash, quantity, tradeLog, remainingOrders):
     cost = order['limit_price'] * order['qty']
@@ -138,8 +135,12 @@ def run_backtest(BARS, strategy, initial_cash=100_000.0, **strategy_kwargs):
     tradeLog      = []
     equityValue   = []
 
-    if strategy.__name__ == 'reverse_momentum_simple':
-        all_signals = [strategy(BARS.iloc[:i+1], **strategy_kwargs) for i in range(1, len(BARS))]
+    if 'simple' in strategy.__name__:
+        print("running simple version...")
+        avgPrices = BARS['avgPrice'].to_numpy()
+        all_signals = []
+        for i in range(1, len(BARS)):
+            all_signals.append(strategy(avgPrices[:i+1], **strategy_kwargs))
     else:
         all_signals = strategy(BARS, **strategy_kwargs)
 
@@ -203,64 +204,8 @@ def compute_metrics(tradeLog, equityCurve, initial_cash):
         'final_value':      round(final_value, 2),
     }
 
-
-# def _auto_resample_rule(BARS):
-#     days = (BARS.index[-1] - BARS.index[0]).days
-#     if days < 2:   return '1min'
-#     if days < 14:  return '1h'
-#     return '4h'
-
-# def _resample_bars(BARS, rule):
-#     if rule == '1min':
-#         return BARS
-#     return BARS.resample(rule).agg({
-#         'Open': 'first', 'High': 'max',
-#         'Low': 'min', 'Close': 'last', 'Volume': 'sum',
-#     }).dropna()
-
 def _daily_returns(equityCurve):
-    # Resample to daily closes before passing to quantstats so annualization
-    # (252 periods/year) is correct regardless of bar frequency.
     return equityCurve.resample('D').last().pct_change().dropna()
-
-# def _plot_micro(BARS, tradeLog, symbol, strategy_name, style):
-#     rule   = _auto_resample_rule(BARS)
-#     BARS_d = _resample_bars(BARS, rule)
-#
-#     fig = mpf.figure(style=style, figsize=(16, 8))
-#     fig.suptitle(f"{symbol}  —  {strategy_name}  [Micro · {rule} · UTC]")
-#     fig.subplots_adjust(left=0.08, right=0.98, top=0.93, bottom=0.08, hspace=0.3)
-#
-#     gs  = fig.add_gridspec(2, 1, height_ratios=[3, 1])
-#     ax_c = fig.add_subplot(gs[0])
-#     ax_v = fig.add_subplot(gs[1])
-#     ax_v.set_xlabel('Time (UTC)')
-#     mpf.plot(BARS_d, ax=ax_c, volume=ax_v, type='candle', style=style)
-#
-#     for trade in tradeLog:
-#         ts     = trade['timestamp']
-#         bucket = BARS_d.index[BARS_d.index <= ts]
-#         if len(bucket) == 0:
-#             continue
-#         x      = BARS_d.index.get_loc(bucket[-1])
-#         is_buy = trade['side'] == 'buy'
-#         ax_c.plot(x, trade['price'],
-#                   marker='^' if is_buy else 'v',
-#                   color='#00e676' if is_buy else '#ff5252',
-#                   markersize=8, zorder=5, linestyle='None')
-#
-#     buy_handle  = mlines.Line2D([], [], marker='^', color='#00e676', linestyle='None', markersize=8, label='Buy fill')
-#     sell_handle = mlines.Line2D([], [], marker='v', color='#ff5252', linestyle='None', markersize=8, label='Sell fill')
-#     ax_c.legend(handles=[buy_handle, sell_handle], loc='upper left', framealpha=0.6,
-#                 facecolor='#22272d', edgecolor='#39424c', labelcolor='whitesmoke')
-#     return fig
-
-# def plotBacktest(BARS, tradeLog, equityCurve, metrics, symbol='BTC/USD', strategy_name=''):
-#     style = figureStyle()
-#     qs.reports.full(_daily_returns(equityCurve), benchmark=None,
-#                     title=f"{symbol} — {strategy_name} (UTC)")
-#     _plot_micro(BARS, tradeLog, symbol, strategy_name, style)
-#     plt.show()
 
 def save_results(BARS, equityCurve, symbol, strategy_name):
     t_start      = pd.Timestamp(BARS.index[0])
@@ -269,32 +214,13 @@ def save_results(BARS, equityCurve, symbol, strategy_name):
     end_str      = t_end.strftime('%H%M') if t_start.date() == t_end.date() else t_end.strftime('%y%m%d_%H%M')
     timeframe    = f"{start_str}-{end_str}"
     symbol_clean = symbol.replace('/', '-')
-    # os.makedirs(JSONS_DIR, exist_ok=True)
-    os.makedirs(RESULTS_DIR, exist_ok=True)
+    os.makedirs(outputPath, exist_ok=True)
 
-    # filepath = os.path.join(JSONS_DIR, f"{symbol_clean}_{strategy_name}_{timeframe}.json")
-    # data = {
-    #     'metrics': metrics,
-    #     'trades':  [{**t, 'timestamp': str(t['timestamp'])} for t in tradeLog],
-    #     'equity':  [{'timestamp': str(ts), 'value': v} for ts, v in equityCurve.items()],
-    # }
-    # with open(filepath, 'w') as f:
-    #     json.dump(data, f, indent=2)
-    # print(f"json saved to {os.path.relpath(filepath)}!")
 
-    html_path = os.path.join(RESULTS_DIR, f"{symbol_clean}_{strategy_name}_{timeframe}.html")
+    html_path = os.path.join(outputPath, f"{symbol_clean}_{strategy_name}_{timeframe}.html")
     with _dark_mpl():
         qs.reports.html(_daily_returns(equityCurve), benchmark=None,
                         title=f"{symbol} — {strategy_name} (UTC)", output=html_path)
     _inject_dark_css(html_path)
     print(f"tearsheet saved to {os.path.relpath(html_path)}!")
-
-    # style = figureStyle()
-    # bar_freq   = pd.Series(BARS.index).diff().dropna().mode()[0]
-    # full_index = pd.date_range(BARS.index[0], BARS.index[-1], freq=bar_freq)
-    # BARS_plot  = BARS.reindex(full_index)
-    # micro_fig = _plot_micro(BARS_plot, tradeLog, symbol, strategy_name, style)
-    # micro_path = os.path.join(PLOTS_DIR, f"{symbol_clean}_{strategy_name}_{timeframe}_micro.png")
-    # micro_fig.savefig(micro_path, dpi=150, bbox_inches='tight')
-    # plt.close(micro_fig)
-    # print(f"micro plot saved to {os.path.relpath(micro_path)}!")
+    return html_path
