@@ -1,16 +1,12 @@
-"""
-python backtest/backtest.py -s reverse_momentum -t BTC/USD -c 100000 -f backtest/HistoricalData/BTC-USD_500m_20260412_2225.csv
-"""
-
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+import os, sys, json
 from argparse import ArgumentParser
 
+scriptPath = os.path.dirname(os.path.abspath(__file__))
+rootDir = '/'.join(scriptPath.split('/')[:-1])
+sys.path.insert(0, rootDir)
 from TradingTools import receiveHistoricalData, initializeBars, save_bars, load_bars
-from strategies import strategy_map
-from BackTestTools import run_backtest, compute_metrics, plotBacktest, save_results
+from strategies import strategy_map, liveTrade
+from BackTestTools import run_backtest, compute_metrics, save_results
 
 if __name__ == '__main__':
     parser = ArgumentParser(prog='backtest.py', epilog='jkil@nd.edu')
@@ -21,16 +17,16 @@ if __name__ == '__main__':
     parser.add_argument('-f', '--file'    , default=None         , type=str, help='Path to a saved CSV of bars (from fetch_data.py); skips live fetch')
     args = parser.parse_args()
 
-    if args.file:
-        BARS = load_bars(args.file)
-    else:
-        HistoricalData = receiveHistoricalData(args.symbol, duration=args.duration)
-        BARS = initializeBars(HistoricalData)
+    # ————— Load historical data —————————————————————————————————————————————————————
+    if args.file: BARS = load_bars(args.file)
+    else: BARS = initializeBars(receiveHistoricalData(args.symbol, duration=args.duration))
 
+    # ————— Fetch strategy ———————————————————————————————————————————————————————————
+    with open(f"{rootDir}/strategy_params.json") as f: params = json.load(f)
     strategy = strategy_map[args.strategy]
-    tradeLog, equityCurve = run_backtest(BARS, strategy, initial_cash=args.cash)
+    strategy_kwargs = params.get(args.strategy, {})
+
+    # ————— Run backtest —————————————————————————————————————————————————————————————
+    tradeLog, equityCurve = run_backtest(BARS, strategy, initial_cash=args.cash, **strategy_kwargs)
     metrics = compute_metrics(tradeLog, equityCurve, initial_cash=args.cash)
-
-
-    save_results(BARS, tradeLog, equityCurve, metrics, args.symbol, args.strategy, initial_cash=args.cash)
-    # plotBacktest(BARS, tradeLog, equityCurve, metrics, args.symbol, args.strategy)
+    save_results(BARS, equityCurve, args.symbol, args.strategy)

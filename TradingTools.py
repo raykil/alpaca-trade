@@ -1,5 +1,4 @@
 import pandas as pd
-from zoneinfo import ZoneInfo
 from datetime import datetime, timedelta, timezone
 
 from alpaca.data import CryptoHistoricalDataClient
@@ -20,7 +19,7 @@ def receiveHistoricalData(symbol, duration=70, scale='minutes', start=None, end=
     bars = client.get_crypto_bars(params)[symbol]
     for bar in bars:
         HistoricalData.append({
-            'Timestamp': bar.timestamp.astimezone(ZoneInfo("America/New_York")).replace(microsecond=0, tzinfo=None),
+            'Timestamp': bar.timestamp.astimezone(timezone.utc).replace(microsecond=0, tzinfo=None),
             'Open':      bar.open,
             'High':      bar.high,
             'Low':       bar.low,
