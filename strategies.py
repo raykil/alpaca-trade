@@ -16,9 +16,10 @@ def momentum_simple(avgPrices, window=5, threshold=0.001, qty=0.001):
 def momentum(BARS, window=3, threshold=0.001, qty=0.001):
     avgPrices = BARS['avgPrice'].to_numpy()
     avgPrices_f  = avgPrices[window:]
-    avgPrices_i  = avgPrices[:-window]
+    avgPrices_i  = avgPrices[:-window] # can't be done with np.diff, cuz it takes the diff of window-separated values.
     percent_diffs = (avgPrices_f - avgPrices_i)/avgPrices_i # how much percent change relative to initial price in the window (- means price went down)
     percent_diffs = np.pad(percent_diffs, (window, 0), constant_values=np.nan)
+    print(percent_diffs)
 
     MOVES = []
     for idx in range(1, len(avgPrices)):
@@ -31,6 +32,12 @@ def momentum(BARS, window=3, threshold=0.001, qty=0.001):
 
     return MOVES
 
+def new_momentum(BARS, window=3, threshold=0.001, qty=0.001):
+    avgPrices = BARS['avgPrice'].to_numpy()
+    percent_diffs = np.diff(avgPrices)/avgPrices[:-1]
+    print(percent_diffs)
+
+
 def reverse_momentum_simple(avgPrices, window=5, threshold=0.001, qty=0.001):
     current_price = float(avgPrices[-1])
     move = 'hold'
@@ -40,7 +47,8 @@ def reverse_momentum_simple(avgPrices, window=5, threshold=0.001, qty=0.001):
         elif (delta_p < -threshold): move = 'buy'
     return {'move': move, 'qty': qty, 'limit_price': current_price} 
 
-def reverse_momentum(BARS, window=3, threshold=0.001, qty=0.001):
+def reverse_momentum(BARS, window=3, threshold=0.01, qty=0.001):
+    # threshold is in percent!
     avgPrices = BARS['avgPrice'].to_numpy()
     avgPrices_f  = avgPrices[window:]
     avgPrices_i  = avgPrices[:-window]

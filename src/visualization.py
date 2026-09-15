@@ -7,7 +7,7 @@ def appendBars(BARS, msg):
     timezone = "America/New_York"
     timestamp = msg.timestamp.astimezone(ZoneInfo(timezone)).replace(microsecond=0, tzinfo=None)
     message = {'Open': msg.open, 'High': msg.high, 'Low': msg.low, 'Close': msg.close, 'Volume': msg.volume, 'tradeCount': msg.trade_count, 'avgPrice': msg.vwap}
-    BARS.loc[timestamp, ['Open', 'High', 'Low', 'Close', 'Volume', 'avgPrice']] = message
+    BARS.loc[timestamp, ['Open', 'High', 'Low', 'Close', 'Volume', 'avgPrice', 'tradeCount']] = message
     print(f"{'-'*78} {BARS.index[-1]} {'-'*78}")
 
 def figureStyle():
@@ -48,17 +48,17 @@ def plotBars(BARS, axes=None, asset_str=None):
     display = BARS.iloc[-60:]
     mpf.plot(display, ax=ax1, volume=ax2, type='candle', style=style)
 
-    order_bars = display[display['order_qty'].notna()]
-    for ts, row in order_bars.iterrows():
+    order_bars = display['moveDict'][display['moveDict'].apply(lambda m: isinstance(m, dict) and 'order_id' in m)]
+    for ts, moveDict in order_bars.items():
         x      = display.index.get_loc(ts)
-        y      = row['order_limit_price']
-        is_buy = row['move'] == 'buy'
+        y      = moveDict['limit_price']
+        is_buy = moveDict['move'] == 'buy'
         ax1.plot(x, y,
                  marker='^' if is_buy else 'v',
                  color='#00e676' if is_buy else '#ff5252',
                  markersize=10, zorder=5, linestyle='None')
-        filled = row['order_filled_qty']
-        total  = row['order_qty']
+        filled = moveDict['filled_qty']
+        total  = moveDict['qty']
         if filled < total:
             bar_top = display.loc[ts, 'High']
             ax1.annotate(f"{filled:g}/{total:g}", (x, bar_top),

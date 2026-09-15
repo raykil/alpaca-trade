@@ -10,3 +10,6 @@ __pycache__/
 *.png
 *.csv
 **/*results*
+*pricePlots*
+*test.*
+*.txt

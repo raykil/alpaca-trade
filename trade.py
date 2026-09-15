@@ -12,7 +12,7 @@ from strategies import strategy_map
 
 def trade(config, symbol, strategy, **strategy_kwargs):
     HistoricalData = receiveHistoricalData(symbol, duration=60)
-    BARS = initializeBars(HistoricalData)
+    BARS = initializeBars(HistoricalData, include_moveDict=True)
     plt.ion()
     axes = None
 
@@ -20,14 +20,11 @@ def trade(config, symbol, strategy, **strategy_kwargs):
         nonlocal axes
         appendBars(BARS, msg)
         order_info = makeMove(BARS, strategy, **strategy_kwargs)
-        appendMove(BARS, order_info['move'])
+        appendMove(BARS, order_info)
         if order_info['move'] in ('buy', 'sell'):
             order_id = placeOrder(config, symbol, order_info)
             if order_id:
-                BARS.loc[BARS.index[-1], 'order_qty']         = order_info['qty']
-                BARS.loc[BARS.index[-1], 'order_limit_price'] = order_info['limit_price']
-                BARS.loc[BARS.index[-1], 'order_filled_qty']  = 0.0
-                BARS.loc[BARS.index[-1], 'order_id']          = order_id
+                BARS.at[BARS.index[-1], 'moveDict'].update({'filled_qty': 0.0, 'order_id': order_id})
         trackOrder(config, BARS)
         asset_str = trackAsset(config)
         axes = plotBars(BARS, axes, asset_str)

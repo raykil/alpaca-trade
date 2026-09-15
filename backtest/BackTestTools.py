@@ -4,13 +4,13 @@ import pandas as pd
 import quantstats as qs
 
 # ── colour palette ───────────────────────────────────────────────────────────
-_BG        = '#1c2129'   # page / figure outer background
-_AXES      = '#0f1419'   # axes plot area  (darker than page for depth)
-_GRID      = '#39424c'   # grid lines / borders
-_TEXT      = '#e8e8e8'   # all text
-_TICK      = '#b0b8c4'   # axis tick labels (slightly muted)
-_BLUE      = '#6CA4F8'   # primary line colour (equity curve, rolling metrics)
-_HDR_BG    = '#1a2d50'   # table header background (blue-tinted dark)
+_BG     = '#1c2129'   # page / figure outer background
+_AXES   = '#0f1419'   # axes plot area  (darker than page for depth)
+_GRID   = '#39424c'   # grid lines / borders
+_TEXT   = '#e8e8e8'   # all text
+_TICK   = '#b0b8c4'   # axis tick labels (slightly muted)
+_BLUE   = '#6CA4F8'   # primary line colour (equity curve, rolling metrics)
+_HDR_BG = '#1a2d50'   # table header background (blue-tinted dark)
 
 # QuantStats hardcodes these colours in its SVG output — map each to our palette
 _SVG_SUBS = [
@@ -99,19 +99,16 @@ def _inject_dark_css(html_path):
 
 outputPath = os.path.join(os.path.dirname(__file__), 'results')
 
-def OrderBuy(order, timestamp, cash, quantity, tradeLog, remainingOrders):
-    cost = order['limit_price'] * order['qty']
-    if cash >= cost:
-        cash -= cost
-        quantity += order['qty']
-        tradeLog.append({ # assumes all order is filled exactly at limit price (conservative, which is good) at the moment, all or nothing. It's good assumption for now.
-            'timestamp': timestamp,
-            'side': 'buy',
-            'qty': order['qty'],
-            'price': order['limit_price']
-        })
-    else:
-        remainingOrders.append(order)  # can't afford — keep pending
+def OrderBuy(order, timestamp, cash, quantity, tradeLog):
+    cash -= order['limit_price'] * order['qty']
+    quantity += order['qty']
+    tradeLog.append({ # assumes all order is filled exactly at limit price (conservative, which is good) at the moment, all or nothing. It's good assumption for now.
+        'placed': order['placed'],
+        'filled': timestamp,
+        'side': 'buy',
+        'qty': order['qty'],
+        'price': order['limit_price']
+    })
     return cash, quantity
 
 def OrderSell(order, timestamp, cash, quantity, tradeLog):
@@ -120,7 +117,8 @@ def OrderSell(order, timestamp, cash, quantity, tradeLog):
         cash += order['limit_price'] * sell_qty
         quantity -= sell_qty
         tradeLog.append({
-            'timestamp': timestamp,
+            'placed': order['placed'],
+            'filled': timestamp,
             'side': 'sell',
             'qty': sell_qty,
             'price': order['limit_price']
@@ -131,51 +129,46 @@ def run_backtest(BARS, strategy, initial_cash=100_000.0, **strategy_kwargs):
     # Initialize assets
     cash          = initial_cash
     quantity      = 0.0
-    pendingOrders = [] # list of {side, qty, limit_price}. Limit price: execute order iff the price I suggested is better.
-    tradeLog      = []
-    equityValue   = []
+    pendingOrders = [] # list of {placed, side, qty, limit_price}. Limit price: execute order iff the price I suggested is better.
+    tradeLog      = [] # contain info on COMPLETED transactions.
+    equityValue   = [] # Total portfolio per bar. cash + (stock * close_price)
+    all_signals = strategy(BARS, **strategy_kwargs)
 
-    if 'simple' in strategy.__name__:
-        print("running simple version...")
-        avgPrices = BARS['avgPrice'].to_numpy()
-        all_signals = []
-        for i in range(1, len(BARS)):
-            all_signals.append(strategy(avgPrices[:i+1], **strategy_kwargs))
-    else:
-        all_signals = strategy(BARS, **strategy_kwargs)
-
-    low   = BARS['Low'].to_numpy()
-    high  = BARS['High'].to_numpy()
-    close = BARS['Close'].to_numpy()
-    index = BARS.index
+    LOWS    = BARS['Low'].to_numpy()
+    HIGHS   = BARS['High'].to_numpy()
+    CLOSES  = BARS['Close'].to_numpy()
+    INDICES = BARS.index
 
     for i in range(1, len(BARS)):
-        bar_low, bar_high = low[i], high[i]
-        timestamp = index[i]
+        bar_low = LOWS[i]
+        bar_high = HIGHS[i]
+        timestamp = INDICES[i]
 
-        # Check pending orders
-        remainingOrders = []
-        for order in pendingOrders:
-            goodToBuy  = order['side'] == 'buy'  and bar_low  <= order['limit_price']
+        # If stock price match with what PendingOrders' limit_price, buy or sell.
+        for order in pendingOrders[:]:
+            goodToBuy  = order['side'] == 'buy'  and bar_low  <= order['limit_price'] and cash >= order['limit_price'] * order['qty']
             goodToSell = order['side'] == 'sell' and bar_high >= order['limit_price']
-            if    goodToBuy : cash, quantity = OrderBuy(order, timestamp, cash, quantity, tradeLog, remainingOrders)
-            elif  goodToSell: cash, quantity = OrderSell(order, timestamp, cash, quantity, tradeLog)
-            else: remainingOrders.append(order)
-        pendingOrders = remainingOrders
+            if   goodToBuy : cash, quantity = OrderBuy(order, timestamp, cash, quantity, tradeLog)
+            elif goodToSell: cash, quantity = OrderSell(order, timestamp, cash, quantity, tradeLog)
+            if goodToBuy or goodToSell: pendingOrders.remove(order)
 
-        # Place new order from precomputed signal
+        # Place new order
         orderInfo = all_signals[i - 1]
+        # print("all_signals", all_signals)
         if orderInfo['move'] in ('buy', 'sell'):
             pendingOrders.append({
+                'placed':      timestamp,
                 'side':        orderInfo['move'],
                 'qty':         orderInfo['qty'],
                 'limit_price': orderInfo['limit_price'],
             })
+        print(timestamp, "pendingOrders", pendingOrders)
 
         # Record portfolio value
-        equityValue.append(cash + quantity * close[i])
+        equityValue.append(cash + quantity * CLOSES[i]) # cash + (stock * close_price)
 
-    equityCurve = pd.Series(equityValue, index=BARS.index[1:], name='equity')
+    Timestamps = BARS.index[1:]
+    equityCurve = pd.Series(equityValue, index=Timestamps, name='equity')
     return tradeLog, equityCurve
 
 
@@ -216,11 +209,9 @@ def save_results(BARS, equityCurve, symbol, strategy_name):
     symbol_clean = symbol.replace('/', '-')
     os.makedirs(outputPath, exist_ok=True)
 
-
     html_path = os.path.join(outputPath, f"{symbol_clean}_{strategy_name}_{timeframe}.html")
     with _dark_mpl():
-        qs.reports.html(_daily_returns(equityCurve), benchmark=None,
-                        title=f"{symbol} — {strategy_name} (UTC)", output=html_path)
+        qs.reports.html(_daily_returns(equityCurve), benchmark=None, title=f"{symbol} — {strategy_name} (UTC)", output=html_path)
     _inject_dark_css(html_path)
     print(f"tearsheet saved to {os.path.relpath(html_path)}!")
     return html_path

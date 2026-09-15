@@ -9,8 +9,8 @@ from strategies import liveTrade
 def makeMove(BARS, strategy, **kwargs):
     return liveTrade(strategy, BARS, **kwargs)
 
-def appendMove(BARS, move):
-    BARS.loc[BARS.index[-1], 'move'] = move
+def appendMove(BARS, OrderInfo):
+    BARS.at[BARS.index[-1], 'moveDict'] = dict(OrderInfo)
     print(BARS.iloc[-1].to_dict())
 
 def placeOrder(config, symbol, OrderInfo):
@@ -46,10 +46,9 @@ def trackOrder(config, BARS):
     orders = client.get_orders()
     print(f"nOrders: {len(orders)} ({orders[0].symbol if orders else 'none'})")
     fills = {str(o.id): float(o.filled_qty) for o in orders}
-    order_rows = BARS[BARS['order_id'].notna()]
-    for ts, row in order_rows.iterrows():
-        if row['order_id'] in fills:
-            BARS.loc[ts, 'order_filled_qty'] = fills[row['order_id']]
+    for moveDict in BARS['moveDict']:
+        if isinstance(moveDict, dict) and moveDict.get('order_id') in fills:
+            moveDict['filled_qty'] = fills[moveDict['order_id']]
     for order in orders:
         print(
             f"time: {order.submitted_at.astimezone(ZoneInfo('America/New_York')).replace(microsecond=0, tzinfo=None)}  "

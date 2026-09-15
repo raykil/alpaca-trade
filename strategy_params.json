@@ -6,7 +6,7 @@
     },
     "reverse_momentum": {
         "window":    5,
-        "threshold": 0.001,
+        "threshold": 0.01,
         "qty":       0.001
     },
     "rsi_bb_reversion": {
