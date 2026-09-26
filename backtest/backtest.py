@@ -1,25 +1,35 @@
-import os, sys, json, webbrowser
-from argparse import ArgumentParser
-
+from BackTestTools import *
+import matplotlib.pyplot as plt
 scriptPath = os.path.dirname(os.path.abspath(__file__))
 rootDir = '/'.join(scriptPath.split('/')[:-1])
 sys.path.insert(0, rootDir)
-from TradingTools import receiveHistoricalData, initializeBars, load_bars
+from TradingTools import load_bars
 from strategies import strategy_map
-from BackTestTools import run_backtest, compute_metrics, save_results
+
+def plotEquityCurve(initial_cash, equiCurvePath, plotPath, yScale='percent'):
+    equity = pd.read_csv(equiCurvePath, index_col='timestamp', parse_dates=True)['equity']
+    if yScale == 'percent':
+        equity = (equity / initial_cash - 1) * 100
+        ylabel = 'Asset (%)'
+    elif yScale == 'cash':
+        ylabel = 'Asset (USD)'
+    fig, ax = plt.subplots(figsize=(14, 5))
+    ax.plot(equity, color='#58a6ff', linewidth=1)
+    ax.set_ylabel(ylabel)
+    ax.set_title("Equity Curve")
+    ax.ticklabel_format(axis='y', useOffset=False, style='plain')
+    fig.savefig(plotPath, dpi=150, bbox_inches='tight')
+    print(f"\033[1;32m{plotPath.replace(rootDir+'/', '')} saved!\033[0m")
 
 if __name__ == '__main__':
     parser = ArgumentParser(prog='backtest.py', epilog='jkil@nd.edu')
     parser.add_argument('-s', '--strategy', default='reverse_momentum', type=str, help=f"Options: {', '.join(strategy_map.keys())}")
     parser.add_argument('-t', '--symbol'  , default='BTC/USD'    , type=str)
-    # parser.add_argument('-d', '--duration', default=500          , type=int, help='Number of historical 1-minute bars to fetch')
     parser.add_argument('-c', '--cash'    , default=100_000.0    , type=float, help='Starting cash')
     parser.add_argument('-f', '--file'    , default=None         , type=str, help='Path to a saved CSV of bars (from fetch_data.py); skips live fetch')
     args = parser.parse_args()
 
     # ————— Load historical data —————————————————————————————————————————————————————
-    # if args.file: BARS = load_bars(args.file)
-    # else: BARS = initializeBars(receiveHistoricalData(args.symbol, duration=args.duration))
     BARS = load_bars(args.file)
 
     # ————— Fetch strategy ———————————————————————————————————————————————————————————
@@ -27,29 +37,31 @@ if __name__ == '__main__':
     strategy = strategy_map[args.strategy]
     strategy_kwargs = params.get(args.strategy, {})
 
-    # ————— Run backtest —————————————————————————————————————————————————————————————
-    tradeLogs, equityCurve = run_backtest(BARS, strategy, initial_cash=args.cash, **strategy_kwargs)
-
+    # ————— Output setting —————————————————————————————————————————————————————————————
     scriptPath  = os.path.dirname(os.path.abspath(__file__))
     rootPath = os.path.dirname(scriptPath) # /Users/raymondkil/alpaca-trade
     outputPath = f"{scriptPath}/results/{args.file.split('/')[-1].replace('_minute.csv', '')}"
     os.makedirs(outputPath, exist_ok=True)
+    tradeLogsPath = f"{outputPath}/tradeLogs.csv"
+    equiCurvePath = f"{outputPath}/equityCurve.csv"
+    equiPlotPath  = f"{outputPath}/equityCurve.png"
 
-    tradeLogFull = f"{outputPath}/tradeLogs.txt"
-    equityCurveFull = f"{outputPath}/equityCurve.txt"
+    # ————— Run backtest —————————————————————————————————————————————————————————————
+    tradeLogs, equiCurve = run_backtest(BARS, strategy, initial_cash=args.cash, **strategy_kwargs)
+    sharpeRatio = compute_sharpeRatio(equiCurve)
+    print(sharpeRatio)
+    # metrics = compute_metrics(tradeLogs, equiCurve, initial_cash=args.cash)
 
-    with open(tradeLogFull, 'w') as f:
-        for tradeLog in tradeLogs: f.write(f"{tradeLog}\n")
-    print(f"\033[1;32m{tradeLogFull.replace(rootPath+'/', '')} saved!\033[0m")
+    # ————— Save results —————————————————————————————————————————————————————————————
+    pd.DataFrame(tradeLogs).to_csv(tradeLogsPath, index=False)
+    print(f"\033[1;32m{tradeLogsPath.replace(rootPath+'/', '')} saved!\033[0m")
 
-    with open(equityCurveFull, 'w') as f:
-        for timestamp, value in equityCurve.items(): f.write(f"{timestamp}  {value:.2f}\n")
-    print(f"\033[1;32m{equityCurveFull.replace(rootPath+'/', '')} saved!\033[0m")
+    equiCurve.to_csv(equiCurvePath, index_label='timestamp', float_format='%.2f')
+    print(f"\033[1;32m{equiCurvePath.replace(rootPath+'/', '')} saved!\033[0m")
 
-    sys.exit()
-
-    metrics = compute_metrics(tradeLogs, equityCurve, initial_cash=args.cash)
-
+    # ————— Plot results —————————————————————————————————————————————————————————————
+    plt.rcParams.update(PlotStyleDict)
+    plotEquityCurve(args.cash, equiCurvePath, equiPlotPath, yScale='cash')
 
     # html_path = save_results(BARS, equityCurve, args.symbol, args.strategy)
 

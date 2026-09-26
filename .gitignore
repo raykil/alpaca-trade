@@ -9,7 +9,7 @@ __pycache__/
 *.log
 *.png
 *.csv
-**/*results*
+*results*/
 *pricePlots*
-*test.*
+test*.py
 *.txt

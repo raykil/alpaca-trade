@@ -1,8 +1,131 @@
-import os, matplotlib
+import os, matplotlib, sys, json
+from argparse import ArgumentParser
 from contextlib import contextmanager
 import pandas as pd
 import quantstats as qs
 
+PlotStyleDict = {
+    'text.color': '#e8e8e8',
+    'font.size': 12,
+    'xtick.color': '#b0b8c4',
+    'ytick.color': '#b0b8c4',
+    'axes.labelcolor': '#e8e8e8',
+    'axes.titlecolor': '#e8e8e8',
+    'axes.titlesize': 16,
+    'axes.edgecolor': '#39424c',
+    'axes.facecolor': '#22272d',
+    'axes.grid': True,
+    'figure.facecolor': '#1c2129',
+    'grid.color': '#39424c',
+    'grid.linestyle': '-.',
+    'grid.linewidth': 0.5
+}
+
+# outputPath = os.path.join(os.path.dirname(__file__), 'results')
+
+def OrderBuy(order, timestamp, cash, quantity, tradeLog):
+    cash -= order['limit_price'] * order['qty']
+    quantity += order['qty']
+    tradeLog.append({ # assumes all order is filled exactly at limit price (conservative, which is good) at the moment, all or nothing. It's good assumption for now.
+        'placed': order['placed'],
+        'filled': timestamp,
+        'side': 'buy',
+        'qty': order['qty'],
+        'price': order['limit_price']
+    })
+    return cash, quantity
+
+def OrderSell(order, timestamp, cash, quantity, tradeLog):
+    sell_qty = min(order['qty'], quantity)
+    if sell_qty > 0:
+        cash += order['limit_price'] * sell_qty
+        quantity -= sell_qty
+        tradeLog.append({
+            'placed': order['placed'],
+            'filled': timestamp,
+            'side': 'sell',
+            'qty': sell_qty,
+            'price': order['limit_price']
+        })
+    return cash, quantity
+
+def run_backtest(BARS, strategy, initial_cash=100_000.0, **strategy_kwargs):
+    # Initialize assets
+    cash          = initial_cash
+    quantity      = 0.0
+    pendingOrders = [] # list of {placed, side, qty, limit_price}. Limit price: execute order iff the price I suggested is better.
+    tradeLog      = [] # contain info on COMPLETED transactions.
+    equityValue   = [] # Total portfolio per bar. cash + (stock * close_price)
+    all_signals = strategy(BARS, **strategy_kwargs) # move dict for each bar. len = len(BARS)-1
+
+    LOWS    = BARS['Low'].to_numpy()
+    HIGHS   = BARS['High'].to_numpy()
+    CLOSES  = BARS['Close'].to_numpy()
+    INDICES = BARS.index
+
+    for i in range(1, len(BARS)):
+        bar_low = LOWS[i]
+        bar_high = HIGHS[i]
+        timestamp = INDICES[i]
+
+        # If stock price match with what PendingOrders' limit_price, buy or sell.
+        for order in pendingOrders[:]:
+            goodToBuy  = order['side'] == 'buy'  and bar_low  <= order['limit_price'] and cash >= order['limit_price'] * order['qty']
+            goodToSell = order['side'] == 'sell' and bar_high >= order['limit_price']
+            if   goodToBuy : cash, quantity = OrderBuy(order, timestamp, cash, quantity, tradeLog)
+            elif goodToSell: cash, quantity = OrderSell(order, timestamp, cash, quantity, tradeLog)
+            if goodToBuy or goodToSell: pendingOrders.remove(order)
+
+        # Place new order
+        orderInfo = all_signals[i - 1]
+        if orderInfo['move'] in ('buy', 'sell'):
+            pendingOrders.append({
+                'placed':      timestamp,
+                'side':        orderInfo['move'],
+                'qty':         orderInfo['qty'],
+                'limit_price': orderInfo['limit_price'],
+            })
+        # print(timestamp, "pendingOrders", pendingOrders)
+
+        # Record portfolio value
+        equityValue.append(cash + quantity * CLOSES[i]) # cash + (stock * close_price)
+
+    Timestamps = BARS.index[1:]
+    equityCurve = pd.Series(equityValue, index=Timestamps, name='equity')
+    return tradeLog, equityCurve
+
+def compute_sharpeRatio(equityCurve):
+    """ 1 is good, 2 is great, 3 is excellant"""
+    percentChange = equityCurve.pct_change().dropna() # percent change in asset wrt 1 step previous asset
+    std = percentChange.std()
+    return percentChange.mean() / std if std > 0 else 0.0
+
+def compute_metrics(tradeLog, equityCurve, initial_cash):
+    final_value  = equityCurve.iloc[-1]
+    total_return = (final_value - initial_cash) / initial_cash * 100
+
+    rolling_max  = equityCurve.cummax()
+    max_drawdown = ((equityCurve - rolling_max) / rolling_max).min() * 100
+
+    sharpe = compute_sharpeRatio(equityCurve)
+
+    # Win rate: pair buys and sells FIFO into round trips
+    buys  = [t['price'] for t in tradeLog if t['side'] == 'buy']
+    sells = [t['price'] for t in tradeLog if t['side'] == 'sell']
+    pairs = list(zip(buys, sells))
+    win_rate = (sum(1 for b, s in pairs if s > b) / len(pairs) * 100) if pairs else 0.0
+
+    return {
+        'total_return_pct': round(total_return, 4),
+        'max_drawdown_pct': round(max_drawdown, 2),
+        'sharpe_ratio':     round(sharpe, 3),
+        'win_rate_pct':     round(win_rate, 1),
+        'n_trades':         len(tradeLog),
+        'final_value':      round(final_value, 2),
+    }
+
+
+"""
 # ── colour palette ───────────────────────────────────────────────────────────
 _BG     = '#1c2129'   # page / figure outer background
 _AXES   = '#0f1419'   # axes plot area  (darker than page for depth)
@@ -38,7 +161,7 @@ _SVG_SUBS = [
 
 @contextmanager
 def _dark_mpl():
-    """Temporarily set matplotlib rcParams to the dark theme (fallback for any mpl-rendered elements)."""
+    # Temporarily set matplotlib rcParams to the dark theme (fallback for any mpl-rendered elements).
     overrides = {
         'figure.facecolor': _BG,    'axes.facecolor':    _AXES,
         'axes.edgecolor':   _GRID,  'axes.labelcolor':   _TEXT,
@@ -56,7 +179,7 @@ def _dark_mpl():
         matplotlib.rcParams.update(saved)
 
 def _inject_dark_css(html_path):
-    """Post-process QuantStats HTML: patch page chrome CSS and SVG chart colours."""
+    # Post-process QuantStats HTML: patch page chrome CSS and SVG chart colours.
     with open(html_path, encoding='utf-8') as f:
         html = f.read()
 
@@ -97,106 +220,6 @@ def _inject_dark_css(html_path):
     with open(html_path, 'w', encoding='utf-8') as f:
         f.write(html)
 
-outputPath = os.path.join(os.path.dirname(__file__), 'results')
-
-def OrderBuy(order, timestamp, cash, quantity, tradeLog):
-    cash -= order['limit_price'] * order['qty']
-    quantity += order['qty']
-    tradeLog.append({ # assumes all order is filled exactly at limit price (conservative, which is good) at the moment, all or nothing. It's good assumption for now.
-        'placed': order['placed'],
-        'filled': timestamp,
-        'side': 'buy',
-        'qty': order['qty'],
-        'price': order['limit_price']
-    })
-    return cash, quantity
-
-def OrderSell(order, timestamp, cash, quantity, tradeLog):
-    sell_qty = min(order['qty'], quantity)
-    if sell_qty > 0:
-        cash += order['limit_price'] * sell_qty
-        quantity -= sell_qty
-        tradeLog.append({
-            'placed': order['placed'],
-            'filled': timestamp,
-            'side': 'sell',
-            'qty': sell_qty,
-            'price': order['limit_price']
-        })
-    return cash, quantity
-
-def run_backtest(BARS, strategy, initial_cash=100_000.0, **strategy_kwargs):
-    # Initialize assets
-    cash          = initial_cash
-    quantity      = 0.0
-    pendingOrders = [] # list of {placed, side, qty, limit_price}. Limit price: execute order iff the price I suggested is better.
-    tradeLog      = [] # contain info on COMPLETED transactions.
-    equityValue   = [] # Total portfolio per bar. cash + (stock * close_price)
-    all_signals = strategy(BARS, **strategy_kwargs)
-
-    LOWS    = BARS['Low'].to_numpy()
-    HIGHS   = BARS['High'].to_numpy()
-    CLOSES  = BARS['Close'].to_numpy()
-    INDICES = BARS.index
-
-    for i in range(1, len(BARS)):
-        bar_low = LOWS[i]
-        bar_high = HIGHS[i]
-        timestamp = INDICES[i]
-
-        # If stock price match with what PendingOrders' limit_price, buy or sell.
-        for order in pendingOrders[:]:
-            goodToBuy  = order['side'] == 'buy'  and bar_low  <= order['limit_price'] and cash >= order['limit_price'] * order['qty']
-            goodToSell = order['side'] == 'sell' and bar_high >= order['limit_price']
-            if   goodToBuy : cash, quantity = OrderBuy(order, timestamp, cash, quantity, tradeLog)
-            elif goodToSell: cash, quantity = OrderSell(order, timestamp, cash, quantity, tradeLog)
-            if goodToBuy or goodToSell: pendingOrders.remove(order)
-
-        # Place new order
-        orderInfo = all_signals[i - 1]
-        # print("all_signals", all_signals)
-        if orderInfo['move'] in ('buy', 'sell'):
-            pendingOrders.append({
-                'placed':      timestamp,
-                'side':        orderInfo['move'],
-                'qty':         orderInfo['qty'],
-                'limit_price': orderInfo['limit_price'],
-            })
-        print(timestamp, "pendingOrders", pendingOrders)
-
-        # Record portfolio value
-        equityValue.append(cash + quantity * CLOSES[i]) # cash + (stock * close_price)
-
-    Timestamps = BARS.index[1:]
-    equityCurve = pd.Series(equityValue, index=Timestamps, name='equity')
-    return tradeLog, equityCurve
-
-
-def compute_metrics(tradeLog, equityCurve, initial_cash):
-    final_value  = equityCurve.iloc[-1]
-    total_return = (final_value - initial_cash) / initial_cash * 100
-
-    rolling_max  = equityCurve.cummax()
-    max_drawdown = ((equityCurve - rolling_max) / rolling_max).min() * 100
-
-    bar_returns  = equityCurve.pct_change().dropna()
-    sharpe       = (bar_returns.mean() / bar_returns.std() if bar_returns.std() > 0 else 0.0)
-
-    # Win rate: pair buys and sells FIFO into round trips
-    buys  = [t['price'] for t in tradeLog if t['side'] == 'buy']
-    sells = [t['price'] for t in tradeLog if t['side'] == 'sell']
-    pairs = list(zip(buys, sells))
-    win_rate = (sum(1 for b, s in pairs if s > b) / len(pairs) * 100) if pairs else 0.0
-
-    return {
-        'total_return_pct': round(total_return, 4),
-        'max_drawdown_pct': round(max_drawdown, 2),
-        'sharpe_ratio':     round(sharpe, 3),
-        'win_rate_pct':     round(win_rate, 1),
-        'n_trades':         len(tradeLog),
-        'final_value':      round(final_value, 2),
-    }
-
 def _daily_returns(equityCurve):
     return equityCurve.resample('D').last().pct_change().dropna()
 
@@ -215,3 +238,4 @@ def save_results(BARS, equityCurve, symbol, strategy_name):
     _inject_dark_css(html_path)
     print(f"tearsheet saved to {os.path.relpath(html_path)}!")
     return html_path
+"""

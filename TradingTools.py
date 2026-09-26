@@ -45,7 +45,7 @@ def save_bars(BARS, filepath):
     BARS.assign(**BARS[['Open', 'High', 'Low', 'Close', 'avgPrice']].map('{:.2f}'.format)).to_csv(filepath)
 
 def load_bars(filepath):
-    return pd.read_csv(filepath, index_col='Timestamp', parse_dates=True)
+    return pd.read_csv(filepath, sep=r'\s*,\s*', engine='python', index_col='Timestamp', parse_dates=True)
 
 def initializeBars(HistoricalData: list = None, include_moveDict: bool = False):
     columns = {
