@@ -1,6 +1,5 @@
 import os, matplotlib, sys, json
 from argparse import ArgumentParser
-from contextlib import contextmanager
 import pandas as pd
 import quantstats as qs
 
@@ -20,8 +19,6 @@ PlotStyleDict = {
     'grid.linestyle': '-.',
     'grid.linewidth': 0.5
 }
-
-# outputPath = os.path.join(os.path.dirname(__file__), 'results')
 
 def OrderBuy(order, timestamp, cash, quantity, tradeLog):
     cash -= order['limit_price'] * order['qty']

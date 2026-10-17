@@ -4,17 +4,14 @@ from datetime import datetime, timedelta, timezone
 
 from alpaca.data import CryptoHistoricalDataClient
 from alpaca.data.requests import CryptoBarsRequest
-from alpaca.data.timeframe import TimeFrame
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
-def receiveHistoricalData(symbol, duration=70, scale='minutes', start=None, end=None):
-    client    = CryptoHistoricalDataClient()
-    timeframe = TimeFrame.Day if scale == 'days' else TimeFrame.Minute
-    if start and end:
-        ti, tf = start, end
-    else:
-        tf = datetime.now(timezone.utc)
-        ti = tf - (timedelta(days=duration) if scale == 'days' else timedelta(minutes=duration))
-    params = CryptoBarsRequest(symbol_or_symbols=symbol, timeframe=timeframe, start=ti, end=tf)
+def receiveHistoricalData(symbol, start, end, scale='15_min'):
+    """scale: ex) 15_min gives 15-minute increment bars (96 bars in a day)."""
+    client = CryptoHistoricalDataClient()
+    increment, unit = scale.split('_')
+    timeframe = TimeFrame(int(increment), TimeFrameUnit(unit.capitalize()))
+    params = CryptoBarsRequest(symbol_or_symbols=symbol, timeframe=timeframe, start=start, end=end)
     HistoricalData = []
     bars = client.get_crypto_bars(params)[symbol] # list of dicts
     for bar in bars:
