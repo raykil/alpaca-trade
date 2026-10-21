@@ -1,19 +1,33 @@
+import os, json
 import pandas as pd
 from argparse import ArgumentParser
 from datetime import datetime, timedelta, timezone
 
-from alpaca.data import CryptoHistoricalDataClient
-from alpaca.data.requests import CryptoBarsRequest
+from alpaca.data import CryptoHistoricalDataClient, StockHistoricalDataClient
+from alpaca.data.requests import CryptoBarsRequest, StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from alpaca.data.enums import Adjustment
 
 def receiveHistoricalData(symbol, start, end, scale='15_min'):
-    """scale: ex) 15_min gives 15-minute increment bars (96 bars in a day)."""
-    client = CryptoHistoricalDataClient()
+    """scale: ex) 15_min gives 15-minute increment bars (96 bars in a day). Crypto symbols contain '/', e.g. BTC/USD."""
     increment, unit = scale.split('_')
     timeframe = TimeFrame(int(increment), TimeFrameUnit(unit.capitalize()))
-    params = CryptoBarsRequest(symbol_or_symbols=symbol, timeframe=timeframe, start=start, end=end)
+    params = {
+        'symbol_or_symbols': symbol,
+        'timeframe': timeframe,
+        'start'    : start,
+        'end'      : end
+    }
+
+    isCrypto = '/' in symbol
+    if isCrypto:
+        bars = CryptoHistoricalDataClient().get_crypto_bars(CryptoBarsRequest(**params))[symbol]
+    else:
+        configPath = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+        with open(configPath) as f: keys = json.load(f)['crypto_paper']
+        bars = StockHistoricalDataClient(keys['api-key'], keys['secret-key']).get_stock_bars(StockBarsRequest(**params, adjustment=Adjustment.ALL))[symbol]
+    
     HistoricalData = []
-    bars = client.get_crypto_bars(params)[symbol] # list of dicts
     for bar in bars:
         HistoricalData.append({
             'Timestamp' : bar.timestamp.astimezone(timezone.utc).replace(microsecond=0, tzinfo=None),
@@ -37,9 +51,6 @@ def readHistoricalData(filepath, max_line=None):
                 data[k] = v
             HistoricalData.append(data)
     return HistoricalData
-
-def save_bars(BARS, filepath):
-    BARS.assign(**BARS[['Open', 'High', 'Low', 'Close', 'avgPrice']].map('{:.2f}'.format)).to_csv(filepath)
 
 def load_bars(filepath):
     return pd.read_csv(filepath, sep=r'\s*,\s*', engine='python', index_col='Timestamp', parse_dates=True)

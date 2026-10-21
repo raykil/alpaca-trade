@@ -96,8 +96,8 @@ def evaluate_features(bars):
     FEATURE_DICT['ret_5']      = eval_laggedReturn(price, lag=5)
     FEATURE_DICT['ret_10']     = eval_laggedReturn(price, lag=10)
     FEATURE_DICT['ret_30']     = eval_laggedReturn(price, lag=30)
-    FEATURE_DICT['hour']       = BARS.index.hour
-    FEATURE_DICT['day_of_week']= BARS.index.dayofweek
+    FEATURE_DICT['hour']       = bars.index.hour
+    FEATURE_DICT['day_of_week']= bars.index.dayofweek
 
     return FEATURE_DICT
 

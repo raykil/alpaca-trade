@@ -48,9 +48,10 @@ def setRange(DATA, range):
     return {k: np.asarray(v)[inRange] for k, v in DATA.items()}
 
 # Ex) python plot_price.py -i HistoricalData/BTC-USD_251018_0000-251021_2358_minute.csv -r 251021_0000-251021_2359 -g 50
+# for f in NeuralNetwork/data_clean/*.csv; do python backtest/plot_price.py -i "$f" -g 1000; done
 parser = ArgumentParser(prog='price_plotter.py', description='Plot a candlestick chart from a historical-bar CSV.', epilog='jkil@nd.edu')
 parser.add_argument('-i', '--inputPath'  , required=True, type=str, help='CSV to plot, e.g. HistoricalData/BTC-USD_251018_0000-251021_2358_minute.csv')
-parser.add_argument('-g', '--granularity', default=100  , type=int, help='How many source bars are grouped into one candle')
+parser.add_argument('-g', '--granularity', default=100  , type=int, help='How many bars are grouped into one candle')
 parser.add_argument('-r', '--range'      , default='-'  , type=str, help='Optional: time window to plot. Format: "YYMMDD_HHMM-YYMMDD_HHMM". If one side empty, goes until beginning/end of data.')
 args = parser.parse_args()
 
@@ -94,12 +95,13 @@ print(f"\033[1;32mSaved {len(BARS_JSON)} bars to {outjsonFull.replace(rootPath+'
 # —————————— Plotting ————————————————————
 colors = ['#2d8b30' if ci >= oi else '#a50f12' for oi, ci in zip(opens, closes)]
 plt.rcParams.update(PlotStyleDict)
-fig, ax = plt.subplots(figsize=(14, 7))
+fig, (ax, ax2) = plt.subplots(2, 1, sharex=True, figsize=(14, 9), gridspec_kw={'height_ratios': [3, 1], 'hspace': 0.05})
 for color in set(colors):
     mask = np.array(colors) == color
     ax.errorbar(x_axis[mask], (highs + lows)[mask] / 2, yerr=(highs - lows)[mask] / 2, fmt='none', ecolor=color, elinewidth=0.8, capsize=3) # wisks
 ax.bar(x_axis, bodies, bottom=bottoms, width=0.6, color=colors, zorder=2) # bodies
 ax.plot(x_axis, DATA['avgPrice'], '.-', color='#6CA4F8', lw=0.8, ms=3, zorder=3, label='avgPrice')
+ax2.bar(x_axis, DATA['Volume'], width=0.6, color='orange', zorder=2)
 
 barMinutes = (np.datetime64(times_i[1]) - np.datetime64(times_i[0])) / np.timedelta64(1, 'm')
 symbol, timeframe = args.inputPath.split('/')[-1].rsplit('_', 1)[0].split('_', 1)
@@ -110,9 +112,10 @@ ax.text(0.02, 0.88, f"$t_i$ = {t_i}\n$t_f$ = {t_f}", transform=ax.transAxes, ha=
 ax.set_title(symbol)
 ax.legend()
 tickStep = int(len(bodies)/12) # denominator ~ nTickmarks
-ax.set_xticks(x_axis[::tickStep])
-ax.set_xticklabels([t[5:16] for t in times_i[::tickStep]], rotation=45)
+ax2.set_xticks(x_axis[::tickStep])
+ax2.set_xticklabels(pd.to_datetime(times_i[::tickStep]).strftime('%y/%m/%d %H:%M'), rotation=45, ha='right', rotation_mode='anchor')
 ax.set_ylabel("Price (USD)")
+ax2.set_ylabel("Volume")
 
 fig.savefig(outplotFull, dpi=300, bbox_inches='tight')
 print(f"\033[1;32mSaved plot to {outplotFull.replace(rootPath+'/','')}\033[0m")
