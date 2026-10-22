@@ -1,3 +1,8 @@
+"""
+1) Converts time zone UTC -> EST.
+2) Cuts out bars outside normal trade hours (09:30-16:00 EST normal days, 09:30-13:00 EST half days)
+"""
+
 import os, sys, glob, json
 import pandas as pd
 from alpaca.trading.client import TradingClient
