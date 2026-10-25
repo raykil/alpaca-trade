@@ -13,4 +13,6 @@ __pycache__/
 *pricePlots*
 test*.py
 *.txt
+*.npz
 *working*
+*jobs*

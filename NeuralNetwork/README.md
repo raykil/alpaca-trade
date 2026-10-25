@@ -21,6 +21,13 @@ Check that there are no trades outside regular trading hours, and that there are
 
 ## 3. Build features
 For a specified symbol, for each row, compute training features and save to `NeuralNetwork/data_features`.
+Labels are also assigned at this stage.
 ```bash
 python build_features.py -t {symbol}
+```
+
+## 4. 
+Creates single `train.npz`, `valid.npz`, and `holdout.npz`. Holdout for testing ticker that did NOT enter training. Generalizability test.
+```bash
+python splitDataset.py
 ```

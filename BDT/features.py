@@ -55,6 +55,9 @@ def eval_emasmaCrossover(price, ema_span=10, sma_span=20):
     return ema_sma_crossover
 
 def eval_atr(price, high, low, close, span=14):
+    """
+    ATR = Average True Range. Largest of HI-LO, |HI-CL|, |LO-CL| (normalized to current price) over span.
+    """
     prev_close = close.shift(1)
     true_range = pd.concat([high-low, (high-prev_close).abs(), (low-prev_close).abs()], axis=1).max(axis=1)
     atr = true_range.rolling(span).mean() / price
