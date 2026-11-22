@@ -16,3 +16,5 @@ test*.py
 *.npz
 *working*
 *jobs*
+[0-9][0-9][0-9][0-9][0-9][0-9]_*/
+!NeuralNetwork/training_data_flow.png

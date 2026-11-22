@@ -1,6 +1,6 @@
 """
-Input : NeuralNetwork/data_split/{train,valid}.npz
-Output: NeuralNetwork/models/mlp_w{window}.pt
+Input : NeuralNetwork/data_npz/{train,valid}.npz
+Output: NeuralNetwork/{yymmdd}_models/mlp_w{window}.pt
 """
 
 import os
@@ -32,8 +32,17 @@ class WindowDataset(Dataset):
         return self.features[self.ends[i].unsqueeze(-1) + self.offsets], self.labels[i]
 
 def build_mlp(window, nFeatures, hidden=128, dropout=0.2):
-    return nn.Sequential(nn.Flatten(), nn.Linear(window * nFeatures, hidden), nn.ReLU(), nn.Dropout(dropout),
-                         nn.Linear(hidden, hidden), nn.ReLU(), nn.Dropout(dropout), nn.Linear(hidden, 3)).to(device)
+    MLP = nn.Sequential(
+        nn.Flatten(), 
+        nn.Linear(window * nFeatures, hidden), 
+        nn.ReLU(), 
+        nn.Dropout(dropout),
+        nn.Linear(hidden, hidden), 
+        nn.ReLU(), 
+        nn.Dropout(dropout), 
+        nn.Linear(hidden, 3)
+    ).to(device)
+    return MLP
 
 def run_epoch(model, dataset, lossFn, batchSize, optimizer=None):
     model.train(optimizer is not None)
@@ -49,6 +58,13 @@ def run_epoch(model, dataset, lossFn, batchSize, optimizer=None):
             totalLoss += loss.detach() * len(batch)
     return totalLoss.item() / len(dataset)
 
+def print_model(path):
+    checkpoint = torch.load(path, map_location='cpu')
+    print(f"args: {checkpoint['args']}")
+    for name, weights in checkpoint['model'].items():
+        print(f"{name:10} {list(weights.shape)}")
+    print(f"parameters: {sum(weights.numel() for weights in checkpoint['model'].values()):,}")
+
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('-w', '--window', default=24, type=int, help='Past bars per sample. Default: 24 (2 hours).')
@@ -60,18 +76,19 @@ if __name__ == "__main__":
     args = parser.parse_args()
     torch.manual_seed(0)
 
-    splitPath = os.path.join(scriptPath, 'data_split')
+    # Load Dataset
+    splitPath = os.path.join(scriptPath, 'data_npz')
     train, valid = (WindowDataset(os.path.join(splitPath, f'{name}.npz'), args.window) for name in ['train', 'valid'])
     if args.overfit:
         train.ends, train.labels = train.ends[:args.overfit], train.labels[:args.overfit]
         valid = train
 
-    counts = torch.bincount(train.labels, minlength=3)
-    lossFn = nn.CrossEntropyLoss(weight=counts.sum() / (3 * counts.float()))
-    model = build_mlp(args.window, train.features.shape[1])
+    counts    = torch.bincount(train.labels, minlength=3)
+    lossFn    = nn.CrossEntropyLoss(weight=counts.sum() / (3 * counts.float()))
+    model     = build_mlp(args.window, train.features.shape[1])
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
-    modelPath = os.path.join(scriptPath, 'models', 'overfit.pt' if args.overfit else f'mlp_w{args.window}.pt')
+    modelPath = os.path.join(scriptPath, f'{pd.Timestamp.now():%y%m%d}_models', 'overfit.pt' if args.overfit else f'mlp_w{args.window}.pt')
     os.makedirs(os.path.dirname(modelPath), exist_ok=True)
     bestLoss, badEpochs = np.inf, 0
     for epoch in range(args.epochs):
@@ -83,4 +100,6 @@ if __name__ == "__main__":
             torch.save({'model': model.state_dict(), 'args': vars(args)}, modelPath)
         elif (badEpochs := badEpochs + 1) == args.patience:
             break
+
+    print_model(modelPath)
     print(f"\033[1;32mSaved best model (valid loss {bestLoss:.4f}) to {os.path.relpath(modelPath, os.path.dirname(scriptPath))}\033[0m")
